@@ -6,7 +6,7 @@ import { parseBillWithRegex } from '@/services/regexParser';
 import type { ParsedBillDraft } from '@/types/models';
 
 const enableDirectGroqFallback =
-  process.env.EXPO_PUBLIC_ENABLE_DIRECT_GROQ_FALLBACK === 'true';
+  __DEV__ && process.env.EXPO_PUBLIC_ENABLE_DIRECT_GROQ_FALLBACK === 'true';
 
 export const runBillParsingPipeline = async (
   imageUri: string,

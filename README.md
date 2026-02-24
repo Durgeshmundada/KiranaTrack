@@ -46,7 +46,11 @@ backend/  # Express API
    - `npm --prefix backend run dev`
 5. Start mobile app:
    - `npm --prefix mobile run start`
-6. Open Expo Go on Android and scan the QR code.
+6. Open Expo Go on Android and scan the QR code (development only).
+
+Production note:
+- Expo Go is not a production distribution channel.
+- Use EAS production builds (`eas build --platform android --profile production`) for Play Store/internal release.
 
 ## Validation Commands
 - Mobile typecheck: `npm --prefix mobile run typecheck`
@@ -90,8 +94,9 @@ backend/  # Express API
 
 ## Production Hardening Checklist
 - Add real OCR integration (`react-native-ml-kit`) replacing mock OCR in `mobile/services/ocr.ts`
-- Add Firebase Auth verification in `backend/src/middleware/auth.ts`
-- Add Cloudinary upload in scan pipeline
+- Keep `SUPABASE_DB_POOL_URL` + `SUPABASE_JWT_SECRET` configured in production backend
+- Disable direct mobile Groq fallback in production (`EXPO_PUBLIC_ENABLE_DIRECT_GROQ_FALLBACK=false`)
+- Rotate leaked keys immediately if any service role/Groq key was ever exposed
 - Add DB-level indexes tuned from real usage
 - Add integration tests for critical payment flows
-- Add CI (typecheck + test + build)
+- Add release monitoring + crash reporting

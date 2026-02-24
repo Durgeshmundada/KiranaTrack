@@ -18,6 +18,7 @@ This guide deploys:
 
 Important:
 - Use `SUPABASE_DB_POOL_URL` in production to reduce connection issues and latency.
+- Keep `SUPABASE_JWT_SECRET` set in production so auth verification stays local and fast.
 
 ## 2) Deploy Backend on Render
 
@@ -44,15 +45,25 @@ Important:
 
 ## 3) Configure Mobile for Production
 
-1. Update production env values in `mobile/eas.json`:
+Important:
+- Expo Go is only for development and testing.
+- Production app means EAS build output (`.aab` / `.ipa`) installed from Play/App Store or internal distribution.
+
+1. Create EAS environment variables (Environment: `production`):
    - `EXPO_PUBLIC_API_BASE_URL` -> your deployed backend URL (for example `https://kiranatrack-backend.onrender.com`)
    - `EXPO_PUBLIC_SUPABASE_URL`
    - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-2. Install EAS CLI (if needed):
+   - `EXPO_PUBLIC_ENABLE_DIRECT_GROQ_FALLBACK=false`
+2. Set EAS env vars:
+   - `eas env:create --environment production --name EXPO_PUBLIC_API_BASE_URL --value <BACKEND_URL>`
+   - `eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_URL --value <SUPABASE_URL>`
+   - `eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <SUPABASE_ANON_KEY>`
+   - `eas env:create --environment production --name EXPO_PUBLIC_ENABLE_DIRECT_GROQ_FALLBACK --value false`
+3. Install EAS CLI (if needed):
    - `npm install -g eas-cli`
-3. Login:
+4. Login:
    - `eas login`
-4. Build:
+5. Build:
    - Android AAB: `eas build --platform android --profile production`
    - iOS: `eas build --platform ios --profile production`
 
@@ -78,6 +89,8 @@ Latency:
 
 - `NODE_ENV=production`
 - `CORS_ORIGIN` set to allowed origins (not `*` in strict production)
+- `SUPABASE_DB_POOL_URL` set (required in production backend)
+- `SUPABASE_JWT_SECRET` set (required in production backend)
 - Parser key configured only on backend (`GROQ_API_KEY`)
 - No service role key in mobile app
 - Rate limits verified for expected traffic

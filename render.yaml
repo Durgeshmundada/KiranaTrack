@@ -3,7 +3,7 @@ services:
     name: kiranatrack-backend
     runtime: node
     rootDir: backend
-    plan: free
+    plan: starter
     buildCommand: npm ci && npm run build
     startCommand: npm run start:prod
     healthCheckPath: /health

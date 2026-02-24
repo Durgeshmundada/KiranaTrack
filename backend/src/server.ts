@@ -124,6 +124,11 @@ process.on('SIGINT', () => {
 });
 
 const start = async (): Promise<void> => {
+  const dbSource = env.SUPABASE_DB_POOL_URL ? 'pooler' : 'direct';
+  const authMode = env.SUPABASE_JWT_SECRET ? 'local-jwt' : 'supabase-claims';
+  // eslint-disable-next-line no-console
+  console.log(`Startup config -> db=${dbSource}, auth=${authMode}, env=${env.NODE_ENV}`);
+
   await connectDatabase();
   httpServer = app.listen(env.PORT, () => {
     // eslint-disable-next-line no-console

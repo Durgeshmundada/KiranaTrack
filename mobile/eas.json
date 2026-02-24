@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -9,24 +10,25 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
       "autoIncrement": true,
+      "channel": "production",
+      "environment": "production",
       "android": {
         "buildType": "app-bundle"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://api.example.com",
-        "EXPO_PUBLIC_SUPABASE_URL": "https://PROJECT_REF.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "SUPABASE_ANON_KEY",
-        "EXPO_PUBLIC_ENABLE_DIRECT_GROQ_FALLBACK": "false"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "track": "production"
+      }
+    }
   }
 }

@@ -13,8 +13,8 @@ const emptyToUndefined = (value: unknown): unknown => {
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(4000),
-  SUPABASE_DB_URL: z.string().min(1, 'SUPABASE_DB_URL is required'),
-  SUPABASE_DB_POOL_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  SUPABASE_DB_URL: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  SUPABASE_DB_POOL_URL: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, 'SUPABASE_SERVICE_ROLE_KEY is required'),
   SUPABASE_JWT_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -41,4 +41,18 @@ if (!parsed.success) {
   throw new Error(`Invalid environment configuration: ${message}`);
 }
 
-export const env = parsed.data;
+const envData = parsed.data;
+
+if (!envData.SUPABASE_DB_POOL_URL && !envData.SUPABASE_DB_URL) {
+  throw new Error('Invalid environment configuration: set SUPABASE_DB_POOL_URL or SUPABASE_DB_URL');
+}
+
+if (envData.NODE_ENV === 'production' && !envData.SUPABASE_DB_POOL_URL) {
+  throw new Error('Invalid environment configuration: SUPABASE_DB_POOL_URL is required in production');
+}
+
+if (envData.NODE_ENV === 'production' && !envData.SUPABASE_JWT_SECRET) {
+  throw new Error('Invalid environment configuration: SUPABASE_JWT_SECRET is required in production');
+}
+
+export const env = envData;
