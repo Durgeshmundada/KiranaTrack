@@ -3,12 +3,6 @@
     "name": "KiranaTrack",
     "slug": "kiranatrack",
     "version": "1.0.0",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "fallbackToCacheTimeout": 0
-    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "kiranatrack",
@@ -44,6 +38,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e25ec8f8-bfd3-4618-9e47-9748f8fb71c4"
+      }
+    },
+    "owner": "durgesh_mundada"
   }
 }
