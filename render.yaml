@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: kiranatrack-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        sync: false
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: SUPABASE_DB_POOL_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: RATE_LIMIT_MAX
+        value: "120"
+      - key: PARSER_RATE_LIMIT_MAX
+        value: "30"
+      - key: AUTH_UPSTREAM_TIMEOUT_MS
+        value: "1200"
+      - key: AUTH_CACHE_TTL_MS
+        value: "600000"
+      - key: DB_POOL_MAX
+        value: "20"
+      - key: DB_CONN_TIMEOUT_MS
+        value: "3000"
+      - key: DB_QUERY_TIMEOUT_MS
+        value: "6000"
+      - key: GROQ_TIMEOUT_MS
+        value: "15000"
+      - key: GROQ_MAX_RETRIES
+        value: "1"
