@@ -4,8 +4,12 @@ import {
   type QueryResult,
   type QueryResultRow,
 } from 'pg';
+import dns from 'node:dns';
 
 import { env } from '../config/env';
+
+// Render free instances frequently fail on IPv6 routes; prefer IPv4 DB records.
+dns.setDefaultResultOrder('ipv4first');
 
 export type DatabaseState =
   | 'connected'
