@@ -51,8 +51,4 @@ if (envData.NODE_ENV === 'production' && !envData.SUPABASE_DB_POOL_URL) {
   throw new Error('Invalid environment configuration: SUPABASE_DB_POOL_URL is required in production');
 }
 
-if (envData.NODE_ENV === 'production' && !envData.SUPABASE_JWT_SECRET) {
-  throw new Error('Invalid environment configuration: SUPABASE_JWT_SECRET is required in production');
-}
-
 export const env = envData;
