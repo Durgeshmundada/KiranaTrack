@@ -32,7 +32,7 @@ app.use((req, res, next) => {
 app.use(
   cors({
     origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(','),
-    credentials: true,
+    credentials: env.CORS_ORIGIN !== '*',
   }),
 );
 app.use(helmet());

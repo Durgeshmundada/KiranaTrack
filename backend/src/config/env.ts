@@ -28,8 +28,8 @@ const envSchema = z.object({
   DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(20),
   DB_CONN_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(5000),
   DB_QUERY_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(10000),
-  GROQ_TIMEOUT_MS: z.coerce.number().default(25000),
-  GROQ_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
+  GROQ_TIMEOUT_MS: z.coerce.number().default(15000),
+  GROQ_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(0),
   GROQ_IMAGE_MODEL: z.string().default('meta-llama/llama-4-scout-17b-16e-instruct'),
   GROQ_TEXT_MODEL: z.string().default('llama-3.3-70b-versatile'),
 });

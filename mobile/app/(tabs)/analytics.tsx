@@ -16,6 +16,19 @@ import {
 import { formatCompactINRFromPaise, formatINRFromPaise } from '@/utils/currency';
 import { monthLabel } from '@/utils/date';
 
+const median = (values: number[]): number => {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+  return sorted[middle];
+};
+
 export default function AnalyticsScreen() {
   const bills = useAppStore((state) => state.bills);
   const vendors = useAppStore((state) => state.vendors);
@@ -31,15 +44,59 @@ export default function AnalyticsScreen() {
   const receivableTotal = totalsForCustomers(customers).receivablePaise;
   const netPosition = receivableTotal - outstandingTotal;
 
-  const anomalyCandidates = statusReady
-    .filter((bill) => bill.lineItems.length > 0)
-    .slice(0, 3)
-    .map((bill) => ({
-      id: bill.id,
-      item: bill.lineItems[0]?.name ?? 'Unknown item',
-      deltaPaise: Math.round(bill.lineItems[0]?.ratePaise * 0.18) || 0,
-      vendorName: vendors.find((vendor) => vendor.id === bill.vendorId)?.name ?? 'Vendor',
-    }));
+  const anomalyCandidates = (() => {
+    const groupedRates = new Map<
+      string,
+      Array<{ billId: string; itemName: string; ratePaise: number; billDate: string }>
+    >();
+
+    statusReady.forEach((bill) => {
+      bill.lineItems.forEach((lineItem) => {
+        if (lineItem.ratePaise <= 0) {
+          return;
+        }
+
+        const key = `${bill.vendorId}::${lineItem.name.trim().toLowerCase()}`;
+        const current = groupedRates.get(key) ?? [];
+        current.push({
+          billId: bill.id,
+          itemName: lineItem.name,
+          ratePaise: lineItem.ratePaise,
+          billDate: bill.date,
+        });
+        groupedRates.set(key, current);
+      });
+    });
+
+    return [...groupedRates.entries()]
+      .filter(([, points]) => points.length >= 3)
+      .map(([key, points]) => {
+        const [vendorId] = key.split('::');
+        const ordered = [...points].sort(
+          (a, b) => new Date(b.billDate).getTime() - new Date(a.billDate).getTime(),
+        );
+        const latest = ordered[0];
+        const historicalRates = ordered.slice(1).map((point) => point.ratePaise);
+        const baselineRate = median(historicalRates);
+        if (baselineRate <= 0) {
+          return null;
+        }
+
+        if (latest.ratePaise < baselineRate * 1.15) {
+          return null;
+        }
+
+        return {
+          id: `${latest.billId}-${key}`,
+          item: latest.itemName,
+          deltaPaise: latest.ratePaise - Math.round(baselineRate),
+          vendorName: vendors.find((vendor) => vendor.id === vendorId)?.name ?? 'Vendor',
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .sort((a, b) => b.deltaPaise - a.deltaPaise)
+      .slice(0, 3);
+  })();
 
   return (
     <ScreenContainer contentStyle={styles.content}>

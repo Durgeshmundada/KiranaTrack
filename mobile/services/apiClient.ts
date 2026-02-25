@@ -50,10 +50,11 @@ export const apiRequest = async <T>(
     method = 'GET',
     body,
     headers = {},
-    timeoutMs = 12000,
+    timeoutMs,
     retries,
     retryDelayMs = 700,
   } = options;
+  const effectiveTimeoutMs = timeoutMs ?? (method === 'GET' ? 12000 : 7000);
   const effectiveRetries = retries ?? (method === 'GET' ? 1 : 0);
 
   let attempt = 0;
@@ -70,7 +71,7 @@ export const apiRequest = async <T>(
           },
           body: body !== undefined ? JSON.stringify(body) : undefined,
         },
-        timeoutMs,
+        effectiveTimeoutMs,
       );
 
       const payload = await tryParseJson(response);

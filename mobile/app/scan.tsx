@@ -14,10 +14,18 @@ import { t } from '@/i18n';
 import { runBillParsingPipeline } from '@/services/billPipeline';
 import { ApiError } from '@/services/apiClient';
 import { useAppStore } from '@/store/appStore';
+import type { Bill } from '@/types/models';
 import { radii, typography } from '@/theme/tokens';
 import { formatINRFromPaise, rupeeToPaise } from '@/utils/currency';
 
 const todayIso = () => new Date().toISOString();
+const lineItemTotal = (lineItems: Bill['lineItems']): number =>
+  lineItems.reduce((sum, item) => sum + item.amountPaise, 0);
+
+const paiseToInputRupees = (value: number): string => {
+  const rupees = value / 100;
+  return Number.isInteger(rupees) ? String(rupees) : rupees.toFixed(2);
+};
 
 export default function ScanBillScreen() {
   const addBill = useAppStore((state) => state.addBill);
@@ -31,6 +39,7 @@ export default function ScanBillScreen() {
   const [date, setDate] = useState(todayIso().slice(0, 10));
   const [totalRupee, setTotalRupee] = useState('');
   const [imageHash, setImageHash] = useState('');
+  const [parsedLineItems, setParsedLineItems] = useState<Bill['lineItems']>([]);
 
   const hasEditableDraft = Boolean(imageUri && vendorName && totalRupee);
 
@@ -50,6 +59,7 @@ export default function ScanBillScreen() {
       return;
     }
     setImageUri(result.assets[0]?.uri ?? null);
+    setParsedLineItems([]);
   };
 
   const captureFromCamera = async () => {
@@ -66,6 +76,7 @@ export default function ScanBillScreen() {
       return;
     }
     setImageUri(result.assets[0]?.uri ?? null);
+    setParsedLineItems([]);
   };
 
   const parseSelectedBill = async () => {
@@ -81,9 +92,17 @@ export default function ScanBillScreen() {
       setBillNumber(parsed.draft.billNumber ?? `AUTO-${Date.now().toString().slice(-5)}`);
       setVendorName(parsed.draft.vendorName ?? '');
       setDate((parsed.draft.date ?? todayIso()).slice(0, 10));
-      setTotalRupee(
-        parsed.draft.totalAmountPaise ? String(Math.round(parsed.draft.totalAmountPaise / 100)) : '',
-      );
+      const mappedLineItems: Bill['lineItems'] = parsed.draft.lineItems.map((item, index) => ({
+        id: `parsed-li-${Date.now()}-${index + 1}`,
+        name: item.name,
+        qty: item.qty,
+        ratePaise: item.ratePaise,
+        amountPaise: item.amountPaise,
+      }));
+      setParsedLineItems(mappedLineItems);
+
+      const parsedTotalPaise = parsed.draft.totalAmountPaise ?? lineItemTotal(mappedLineItems);
+      setTotalRupee(parsedTotalPaise > 0 ? paiseToInputRupees(parsedTotalPaise) : '');
 
       if (parsed.source === 'manual') {
         Alert.alert(
@@ -125,22 +144,30 @@ export default function ScanBillScreen() {
     }
 
     try {
+      const totalAmountPaise = rupeeToPaise(totalAmount);
+      const parsedTotalPaise = lineItemTotal(parsedLineItems);
+      const hasReliableParsedItems =
+        parsedLineItems.length > 0 && Math.abs(parsedTotalPaise - totalAmountPaise) <= 100;
+      const lineItemsToSave: Bill['lineItems'] = hasReliableParsedItems
+        ? parsedLineItems
+        : [
+            {
+              id: `li-${Date.now()}`,
+              name: 'Bill Total',
+              qty: 1,
+              ratePaise: totalAmountPaise,
+              amountPaise: totalAmountPaise,
+            },
+          ];
+
       const bill = await addBill({
         billNumber: billNumber.trim() || `AUTO-${Date.now().toString().slice(-5)}`,
         vendorName: vendorName.trim(),
         date: normalizedIsoDate,
-        totalAmountPaise: rupeeToPaise(totalAmount),
+        totalAmountPaise,
         imageUrl: imageUri,
         imageHash: imageHash || 'pending',
-        lineItems: [
-          {
-            id: `li-${Date.now()}`,
-            name: 'Parsed total line',
-            qty: 1,
-            ratePaise: rupeeToPaise(totalAmount),
-            amountPaise: rupeeToPaise(totalAmount),
-          },
-        ],
+        lineItems: lineItemsToSave,
       });
 
       router.replace(`/bill/${bill.id}`);
@@ -256,6 +283,11 @@ export default function ScanBillScreen() {
           <AppText variant="caption" style={styles.previewAmount}>
             {`Preview: ${formatINRFromPaise(rupeeToPaise(Number(totalRupee) || 0))}`}
           </AppText>
+          {parsedLineItems.length > 0 ? (
+            <AppText variant="caption" style={styles.parsedMeta}>
+              {`${parsedLineItems.length} line items parsed`}
+            </AppText>
+          ) : null}
 
           <GradientButton label={t('save')} onPress={saveBill} disabled={!hasEditableDraft} />
         </GlassCard>
@@ -325,5 +357,8 @@ const styles = StyleSheet.create({
   },
   previewAmount: {
     color: '#FDE68A',
+  },
+  parsedMeta: {
+    color: '#86EFAC',
   },
 });

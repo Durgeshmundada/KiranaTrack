@@ -92,7 +92,7 @@ interface AppStoreState {
   editPayment: (
     billId: string,
     paymentId: string,
-    payload: Pick<NewPaymentPayload, 'amountPaise' | 'date'>,
+    payload: NewPaymentPayload,
   ) => Promise<void>;
   deletePayment: (billId: string, paymentId: string) => Promise<void>;
 
@@ -323,6 +323,9 @@ export const useAppStore = create<AppStoreState>()(
         const updatedPayment = await editPaymentRemote(paymentId, {
           amountPaise: payload.amountPaise,
           date: payload.date,
+          collectorName: payload.collectorName,
+          mode: payload.mode,
+          notes: payload.notes,
         });
         set((state) => ({
           bills: state.bills.map((bill) =>

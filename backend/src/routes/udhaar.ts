@@ -8,9 +8,9 @@ import {
   toUdhaarCustomerDoc,
   toUdhaarEntryDoc,
 } from '../db/mappers';
-import { dbQuery } from '../db/postgres';
+import { dbQuery, withTransaction } from '../db/postgres';
 import { asyncHandler } from '../utils/asyncHandler';
-import { notFound, parseBody, sendCreated, sendOk } from '../utils/http';
+import { HttpError, notFound, parseBody, sendCreated, sendOk } from '../utils/http';
 import {
   createUdhaarCustomerSchema,
   createUdhaarEntrySchema,
@@ -122,43 +122,77 @@ udhaarRouter.post(
     const { id } = customerIdParamSchema.parse(req.params);
     const payload = parseBody(createUdhaarEntrySchema, req.body);
 
-    const customer = await dbQuery<{ id: string }>(
-      `
-        select id
-        from udhaar_customers
-        where id = $1
-      `,
-      [id],
-    );
+    await withTransaction(async (client) => {
+      const customer = await dbQuery<{ id: string }>(
+        `
+          select id
+          from udhaar_customers
+          where id = $1
+          for update
+        `,
+        [id],
+        client,
+      );
 
-    if (customer.rows.length === 0) {
-      notFound('Udhaar customer');
-      return;
-    }
+      if (customer.rows.length === 0) {
+        notFound('Udhaar customer');
+      }
 
-    await dbQuery(
-      `
-        insert into udhaar_entries (id, customer_id, type, amount_paise, description, date)
-        values ($1, $2, $3, $4, $5, $6)
-      `,
-      [
-        createObjectId(),
-        id,
-        payload.type,
-        payload.amountPaise,
-        payload.description ?? null,
-        payload.date,
-      ],
-    );
+      if (payload.type === 'repayment') {
+        const balanceResult = await dbQuery<{ balance_paise: number }>(
+          `
+            select coalesce(
+              sum(
+                case
+                  when type = 'credit' then amount_paise
+                  when type = 'repayment' then -amount_paise
+                  else 0
+                end
+              ),
+              0
+            )::int as balance_paise
+            from udhaar_entries
+            where customer_id = $1
+          `,
+          [id],
+          client,
+        );
 
-    await dbQuery(
-      `
-        update udhaar_customers
-        set updated_at = now()
-        where id = $1
-      `,
-      [id],
-    );
+        const balancePaise = balanceResult.rows[0]?.balance_paise ?? 0;
+        if (payload.amountPaise > balancePaise) {
+          throw new HttpError(
+            409,
+            'Repayment exceeds outstanding udhaar balance for this customer',
+          );
+        }
+      }
+
+      await dbQuery(
+        `
+          insert into udhaar_entries (id, customer_id, type, amount_paise, description, date)
+          values ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          createObjectId(),
+          id,
+          payload.type,
+          payload.amountPaise,
+          payload.description ?? null,
+          payload.date,
+        ],
+        client,
+      );
+
+      await dbQuery(
+        `
+          update udhaar_customers
+          set updated_at = now()
+          where id = $1
+        `,
+        [id],
+        client,
+      );
+    });
 
     const updatedCustomer = await fetchCustomerWithEntries(id);
     if (!updatedCustomer) {
@@ -175,38 +209,55 @@ udhaarRouter.delete(
   asyncHandler(async (req, res) => {
     const { id } = entryIdParamSchema.parse(req.params);
 
-    const entry = await dbQuery<{ customer_id: string }>(
-      `
-        select customer_id
-        from udhaar_entries
-        where id = $1
-      `,
-      [id],
-    );
+    const customerId = await withTransaction(async (client) => {
+      const entry = await dbQuery<{ customer_id: string }>(
+        `
+          select customer_id
+          from udhaar_entries
+          where id = $1
+          for update
+        `,
+        [id],
+        client,
+      );
 
-    if (entry.rows.length === 0) {
-      notFound('Udhaar entry');
-      return;
-    }
+      if (entry.rows.length === 0) {
+        notFound('Udhaar entry');
+      }
 
-    const customerId = entry.rows[0].customer_id;
+      const ownerCustomerId = entry.rows[0].customer_id;
+      await dbQuery(
+        `
+          select id
+          from udhaar_customers
+          where id = $1
+          for update
+        `,
+        [ownerCustomerId],
+        client,
+      );
 
-    await dbQuery(
-      `
-        delete from udhaar_entries
-        where id = $1
-      `,
-      [id],
-    );
+      await dbQuery(
+        `
+          delete from udhaar_entries
+          where id = $1
+        `,
+        [id],
+        client,
+      );
 
-    await dbQuery(
-      `
-        update udhaar_customers
-        set updated_at = now()
-        where id = $1
-      `,
-      [customerId],
-    );
+      await dbQuery(
+        `
+          update udhaar_customers
+          set updated_at = now()
+          where id = $1
+        `,
+        [ownerCustomerId],
+        client,
+      );
+
+      return ownerCustomerId;
+    });
 
     const customer = await fetchCustomerWithEntries(customerId);
 

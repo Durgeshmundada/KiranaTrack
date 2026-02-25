@@ -96,13 +96,12 @@ export default function RootLayout() {
       return;
     }
 
-    const isPublicRoute =
-      pathname === '/' || pathname === '/index' || pathname.startsWith('/login');
+    const isIntroRoute = pathname === '/' || pathname === '/index';
+    const isPublicRoute = isIntroRoute || pathname.startsWith('/login');
 
     if (!launchRedirectHandledRef.current) {
       launchRedirectHandledRef.current = true;
-      const shouldShowIntroFirst = !isPublicRoute;
-      if (shouldShowIntroFirst) {
+      if (!isIntroRoute) {
         router.replace('/' as never);
         return;
       }

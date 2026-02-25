@@ -11,14 +11,14 @@ const PARSE_IMAGE_COMPRESS = 0.55;
 const parseTimeoutMs = (() => {
   const raw = Number(process.env.EXPO_PUBLIC_PARSER_TIMEOUT_MS ?? '');
   if (!Number.isFinite(raw)) {
-    return 22000;
+    return 15000;
   }
-  return Math.min(Math.max(raw, 10000), 45000);
+  return Math.min(Math.max(raw, 8000), 30000);
 })();
 const parseRetries = (() => {
   const raw = Number(process.env.EXPO_PUBLIC_PARSER_RETRIES ?? '');
   if (!Number.isInteger(raw)) {
-    return 1;
+    return 0;
   }
   return Math.min(Math.max(raw, 0), 2);
 })();

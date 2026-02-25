@@ -81,8 +81,14 @@ create table if not exists public.udhaar_entries (
 );
 
 create index if not exists idx_bills_vendor_date on public.bills (vendor_id, date desc);
+create index if not exists idx_bills_date_desc on public.bills (date desc);
+create unique index if not exists ux_vendors_name_ci on public.vendors (lower(name));
+create unique index if not exists ux_bills_vendor_image_hash
+  on public.bills (vendor_id, image_hash)
+  where image_hash <> 'pending' and image_hash <> '';
 create index if not exists idx_bill_line_items_bill on public.bill_line_items (bill_id);
 create index if not exists idx_payments_bill_date on public.payments (bill_id, date desc);
+create index if not exists idx_payments_date_desc on public.payments (date desc);
 create index if not exists idx_payment_logs_payment on public.payment_edit_logs (payment_id, edited_at desc);
 create index if not exists idx_oos_item_status on public.out_of_stock_items (item_name, status);
 create index if not exists idx_udhaar_customers_name on public.udhaar_customers (customer_name);

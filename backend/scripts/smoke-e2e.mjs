@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import dns from 'node:dns';
 
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+
+dns.setDefaultResultOrder('ipv4first');
 
 const resolveWorkspaceRoot = () => {
   const cwd = process.cwd();

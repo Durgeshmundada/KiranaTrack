@@ -18,8 +18,12 @@ import {
 } from '../db/mappers';
 import { dbQuery, withTransaction } from '../db/postgres';
 import { attachBillSummaries, getPaymentTotalsByBillIds } from '../services/billing';
+import {
+  assertPaymentWithinBillLimit,
+  fetchBillFinancialsForUpdate,
+} from '../services/paymentGuards';
 import { asyncHandler } from '../utils/asyncHandler';
-import { notFound, parseBody, parseQuery, sendCreated, sendOk } from '../utils/http';
+import { HttpError, notFound, parseBody, parseQuery, sendCreated, sendOk } from '../utils/http';
 import {
   billsQuerySchema,
   createBillSchema,
@@ -228,6 +232,25 @@ billsRouter.post(
     }
 
     const bill = await withTransaction(async (client) => {
+      const duplicate = await dbQuery<BillRow>(
+        `
+          select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
+          from bills
+          where vendor_id = $1
+            and (
+              bill_number = $2
+              or ($3 <> 'pending' and image_hash = $3)
+            )
+          limit 1
+        `,
+        [payload.vendorId, payload.billNumber, payload.imageHash],
+        client,
+      );
+
+      if (duplicate.rows.length > 0) {
+        throw new HttpError(409, 'Duplicate bill detected for this vendor');
+      }
+
       const billId = createObjectId();
       const inserted = await dbQuery<BillRow>(
         `
@@ -257,20 +280,14 @@ billsRouter.post(
 
       await insertLineItems(billId, payload.lineItems, client);
 
-      const lines = await dbQuery<BillLineItemRow>(
-        `
-          select id, bill_id, name, qty, rate_paise, amount_paise, created_at
-          from bill_line_items
-          where bill_id = $1
-          order by created_at asc
-        `,
-        [billId],
-        client,
-      );
-
       return toBillDoc(
         inserted.rows[0],
-        lines.rows.map(toBillLineItemDoc),
+        payload.lineItems.map((lineItem) => ({
+          name: lineItem.name,
+          qty: lineItem.qty,
+          ratePaise: lineItem.ratePaise,
+          amountPaise: lineItem.amountPaise,
+        })),
         inserted.rows[0].vendor_id,
       );
     });
@@ -407,6 +424,25 @@ billsRouter.put(
         notFound('Bill');
       }
 
+      if (payload.totalAmountPaise !== undefined) {
+        const paid = await dbQuery<{ paid_paise: number }>(
+          `
+            select coalesce(sum(amount_paise), 0)::int as paid_paise
+            from payments
+            where bill_id = $1
+          `,
+          [id],
+          client,
+        );
+        const paidPaise = paid.rows[0]?.paid_paise ?? 0;
+        if (payload.totalAmountPaise < paidPaise) {
+          throw new HttpError(
+            409,
+            'Bill total cannot be lower than the amount already paid',
+          );
+        }
+      }
+
       const updates: string[] = [];
       const values: unknown[] = [];
 
@@ -520,46 +556,46 @@ billsRouter.post(
     const { id } = idParamSchema.parse(req.params);
     const payload = parseBody(createPaymentSchema, req.body);
 
-    const bill = await dbQuery<{ id: string }>(
-      `
-        select id
-        from bills
-        where id = $1
-      `,
-      [id],
-    );
+    const payment = await withTransaction(async (client) => {
+      const billFinancials = await fetchBillFinancialsForUpdate(id, client);
+      const lockedBill = billFinancials ?? notFound('Bill');
 
-    if (bill.rows.length === 0) {
-      notFound('Bill');
-      return;
-    }
+      assertPaymentWithinBillLimit({
+        totalAmountPaise: lockedBill.total_amount_paise,
+        alreadyPaidPaise: lockedBill.paid_paise,
+        paymentAmountPaise: payload.amountPaise,
+      });
 
-    const payment = await dbQuery<PaymentRow>(
-      `
-        insert into payments (
+      const insertedPayment = await dbQuery<PaymentRow>(
+        `
+          insert into payments (
+            id,
+            bill_id,
+            amount_paise,
+            date,
+            collector_name,
+            mode,
+            notes
+          )
+          values ($1, $2, $3, $4, $5, $6, $7)
+          returning id, bill_id, amount_paise, date, collector_name, mode, notes, created_at, updated_at
+        `,
+        [
+          createObjectId(),
           id,
-          bill_id,
-          amount_paise,
-          date,
-          collector_name,
-          mode,
-          notes
-        )
-        values ($1, $2, $3, $4, $5, $6, $7)
-        returning id, bill_id, amount_paise, date, collector_name, mode, notes, created_at, updated_at
-      `,
-      [
-        createObjectId(),
-        id,
-        payload.amountPaise,
-        payload.date,
-        payload.collectorName ?? null,
-        payload.mode,
-        payload.notes ?? null,
-      ],
-    );
+          payload.amountPaise,
+          payload.date,
+          payload.collectorName ?? null,
+          payload.mode,
+          payload.notes ?? null,
+        ],
+        client,
+      );
 
-    sendCreated(res, toPaymentDoc(payment.rows[0], []));
+      return insertedPayment.rows[0];
+    });
+
+    sendCreated(res, toPaymentDoc(payment, []));
   }),
 );
 

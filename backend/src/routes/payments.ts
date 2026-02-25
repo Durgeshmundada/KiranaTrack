@@ -9,6 +9,10 @@ import {
   toPaymentEditLogDoc,
 } from '../db/mappers';
 import { dbQuery, withTransaction } from '../db/postgres';
+import {
+  assertPaymentWithinBillLimit,
+  fetchBillFinancialsForUpdate,
+} from '../services/paymentGuards';
 import { asyncHandler } from '../utils/asyncHandler';
 import { notFound, parseBody, sendOk } from '../utils/http';
 import { objectIdSchema, updatePaymentSchema } from '../validators/schemas';
@@ -45,6 +49,7 @@ paymentsRouter.put(
           select id, bill_id, amount_paise, date, collector_name, mode, notes, created_at, updated_at
           from payments
           where id = $1
+          for update
         `,
         [id],
         client,
@@ -55,6 +60,15 @@ paymentsRouter.put(
       }
 
       const row = current.rows[0];
+      const billFinancials = await fetchBillFinancialsForUpdate(row.bill_id, client);
+      const lockedBill = billFinancials ?? notFound('Bill');
+
+      assertPaymentWithinBillLimit({
+        totalAmountPaise: lockedBill.total_amount_paise,
+        alreadyPaidPaise: lockedBill.paid_paise,
+        paymentAmountPaise: payload.amountPaise,
+        replacingAmountPaise: row.amount_paise,
+      });
 
       await dbQuery(
         `
@@ -115,14 +129,34 @@ paymentsRouter.delete(
   asyncHandler(async (req, res) => {
     const { id } = idParamSchema.parse(req.params);
 
-    const payment = await dbQuery<{ id: string }>(
-      `
-        delete from payments
-        where id = $1
-        returning id
-      `,
-      [id],
-    );
+    const payment = await withTransaction(async (client) => {
+      const existing = await dbQuery<{ id: string }>(
+        `
+          select id
+          from payments
+          where id = $1
+          for update
+        `,
+        [id],
+        client,
+      );
+
+      if (existing.rows.length === 0) {
+        notFound('Payment');
+      }
+
+      const deleted = await dbQuery<{ id: string }>(
+        `
+          delete from payments
+          where id = $1
+          returning id
+        `,
+        [id],
+        client,
+      );
+
+      return deleted;
+    });
 
     if (payment.rows.length === 0) {
       notFound('Payment');

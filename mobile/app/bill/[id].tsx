@@ -99,10 +99,15 @@ export default function BillDetailScreen() {
     if (Number.isNaN(amount) || amount <= 0) {
       return;
     }
+    const paymentAmountPaise = rupeeToPaise(amount);
+    if (paymentAmountPaise > remaining) {
+      Alert.alert('Amount too high', 'Payment cannot be more than remaining bill amount.');
+      return;
+    }
 
     try {
       await addPayment(bill.id, {
-        amountPaise: rupeeToPaise(amount),
+        amountPaise: paymentAmountPaise,
         date: new Date(`${paymentDate}T00:00:00.000Z`).toISOString(),
         collectorName: collectorName.trim() || null,
         mode: paymentMode,
@@ -122,11 +127,24 @@ export default function BillDetailScreen() {
     if (Number.isNaN(amount) || amount <= 0) {
       return;
     }
+    const currentPayment = bill.payments.find((entry) => entry.id === editingPaymentId);
+    if (!currentPayment) {
+      return;
+    }
+    const paymentAmountPaise = rupeeToPaise(amount);
+    const maxEditableAmount = remaining + currentPayment.amountPaise;
+    if (paymentAmountPaise > maxEditableAmount) {
+      Alert.alert('Amount too high', 'Edited amount cannot exceed remaining bill amount.');
+      return;
+    }
 
     try {
       await editPayment(bill.id, editingPaymentId, {
-        amountPaise: rupeeToPaise(amount),
+        amountPaise: paymentAmountPaise,
         date: new Date(`${paymentDate}T00:00:00.000Z`).toISOString(),
+        collectorName: collectorName.trim() || null,
+        mode: paymentMode,
+        notes: notes.trim() || null,
       });
       setShowEditModal(false);
       setEditingPaymentId(null);
@@ -186,13 +204,22 @@ export default function BillDetailScreen() {
 
   return (
     <ScreenContainer contentStyle={styles.content}>
-      <ScreenHeader title={t('billDetails')} subtitle={`${bill.billNumber} • ${formatDisplayDate(bill.date)}`} />
+      <ScreenHeader
+        title={t('billDetails')}
+        subtitle={`${bill.billNumber} | ${formatDisplayDate(bill.date)}`}
+      />
 
       <GlassCard intense style={styles.heroCard}>
         <Image source={{ uri: bill.imageUrl }} style={styles.image} resizeMode="cover" />
         <View style={styles.heroCopy}>
           <View style={styles.vendorRow}>
-            <Pressable onPress={() => router.push(`/vendor/${vendor?.id ?? ''}`)}>
+            <Pressable
+              disabled={!vendor?.id}
+              onPress={() => {
+                if (vendor?.id) {
+                  router.push(`/vendor/${vendor.id}`);
+                }
+              }}>
               <AppText variant="subtitle">{vendor?.name ?? t('vendor')}</AppText>
             </Pressable>
             <StatusBadge status={status} label={t(status)} />

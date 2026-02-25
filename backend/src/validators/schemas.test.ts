@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createPaymentSchema, parseBillImageSchema } from './schemas';
+import { createBillSchema, createPaymentSchema, parseBillImageSchema } from './schemas';
 
 describe('schema validation', () => {
   it('validates payment payload', () => {
@@ -19,6 +19,40 @@ describe('schema validation', () => {
   it('rejects invalid image data URL', () => {
     const result = parseBillImageSchema.safeParse({
       imageDataUrl: 'not-a-data-url',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects future payment date', () => {
+    const twoDaysFromNow = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+    const result = createPaymentSchema.safeParse({
+      amountPaise: 1000,
+      date: twoDaysFromNow,
+      collectorName: 'Raju',
+      mode: 'cash',
+      notes: null,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects bill payload when line item total mismatches bill total', () => {
+    const result = createBillSchema.safeParse({
+      billNumber: 'INV-1',
+      vendorId: '0123456789abcdef01234567',
+      date: '2026-02-24',
+      totalAmountPaise: 10_000,
+      imageUrl: 'https://example.com/bill.jpg',
+      imageHash: 'hash-1',
+      lineItems: [
+        {
+          name: 'Rice',
+          qty: 1,
+          ratePaise: 9_000,
+          amountPaise: 9_000,
+        },
+      ],
     });
 
     expect(result.success).toBe(false);

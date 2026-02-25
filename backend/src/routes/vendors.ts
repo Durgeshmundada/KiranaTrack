@@ -35,10 +35,32 @@ vendorsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const payload = parseBody(createVendorSchema, req.body);
+
+    const existingVendor = await dbQuery<VendorRow>(
+      `
+        select id, name, phone, gst_number, default_collector_name, created_at, updated_at
+        from vendors
+        where lower(name) = lower($1)
+        limit 1
+      `,
+      [payload.name],
+    );
+
+    if (existingVendor.rows.length > 0) {
+      sendOk(res, toVendorDoc(existingVendor.rows[0]));
+      return;
+    }
+
     const vendor = await dbQuery<VendorRow>(
       `
         insert into vendors (id, name, phone, gst_number, default_collector_name)
         values ($1, $2, $3, $4, $5)
+        on conflict (name)
+        do update
+          set phone = coalesce(excluded.phone, vendors.phone),
+              gst_number = coalesce(excluded.gst_number, vendors.gst_number),
+              default_collector_name = coalesce(excluded.default_collector_name, vendors.default_collector_name),
+              updated_at = now()
         returning id, name, phone, gst_number, default_collector_name, created_at, updated_at
       `,
       [
