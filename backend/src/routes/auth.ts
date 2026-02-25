@@ -6,9 +6,11 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { HttpError, parseBody, sendCreated, sendOk } from '../utils/http';
 import { authCredentialsSchema } from '../validators/schemas';
 
+const AUTH_ROUTE_TIMEOUT_MS = Math.max(8000, env.AUTH_UPSTREAM_TIMEOUT_MS);
+
 const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), env.AUTH_UPSTREAM_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), AUTH_ROUTE_TIMEOUT_MS);
 
   try {
     return await fetch(input, {
