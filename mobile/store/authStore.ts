@@ -1,7 +1,7 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { create } from 'zustand';
 
-import { supabase } from '@/services/supabaseClient';
+import { isSupabaseConfigured, supabase, supabaseConfigError } from '@/services/supabaseClient';
 
 interface AuthState {
   ready: boolean;
@@ -25,6 +25,16 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
   initialize: async () => {
     if (initialized) {
+      return;
+    }
+
+    if (!isSupabaseConfigured) {
+      initialized = true;
+      set({
+        session: null,
+        user: null,
+        ready: true,
+      });
       return;
     }
 
@@ -60,6 +70,10 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 
   signIn: async (email, password) => {
+    if (!isSupabaseConfigured) {
+      throw new Error(supabaseConfigError ?? 'Supabase is not configured');
+    }
+
     set({ loading: true });
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -75,6 +89,10 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 
   signUp: async (email, password) => {
+    if (!isSupabaseConfigured) {
+      throw new Error(supabaseConfigError ?? 'Supabase is not configured');
+    }
+
     set({ loading: true });
     try {
       const { error } = await supabase.auth.signUp({
@@ -90,6 +108,10 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 
   signOut: async () => {
+    if (!isSupabaseConfigured) {
+      throw new Error(supabaseConfigError ?? 'Supabase is not configured');
+    }
+
     const { error } = await supabase.auth.signOut();
     if (error) {
       throw error;

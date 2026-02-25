@@ -15,6 +15,7 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { AppText } from '@/components/ui/AppText';
 import { GradientButton } from '@/components/ui/GradientButton';
+import { isSupabaseConfigured, supabaseConfigError } from '@/services/supabaseClient';
 import { useAuthStore } from '@/store/authStore';
 import { radii, shadows, typography } from '@/theme/tokens';
 
@@ -96,6 +97,14 @@ export default function LoginScreen() {
         </Animated.View>
 
         <Animated.View entering={FadeInDown.duration(650)} style={styles.card}>
+          {!isSupabaseConfigured ? (
+            <View style={styles.configAlert}>
+              <AppText variant="caption" style={styles.configAlertText}>
+                {supabaseConfigError}
+              </AppText>
+            </View>
+          ) : null}
+
           <View style={styles.modeSwitch}>
             <Pressable
               style={[styles.modeBtn, mode === 'signin' && styles.modeBtnActive]}
@@ -270,5 +279,16 @@ const styles = StyleSheet.create({
   helper: {
     textAlign: 'center',
     color: '#AFC4E2',
+  },
+  configAlert: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.6)',
+    backgroundColor: 'rgba(127,29,29,0.4)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  configAlertText: {
+    color: '#FECACA',
   },
 });

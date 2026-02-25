@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
-const isNodeLikeRuntime =
-  typeof window === 'undefined' && typeof navigator === 'undefined';
+const fallbackSupabaseUrl = 'https://placeholder.invalid';
+const fallbackSupabaseAnonKey = 'public-anon-placeholder';
 
 type AuthStorage = {
   getItem: (key: string) => Promise<string | null>;
@@ -26,13 +26,17 @@ const memoryStorage: AuthStorage = {
 // Use in-memory auth storage so login is session-only (no persisted login across app relaunch).
 const authStorage: AuthStorage = memoryStorage;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    'Missing Supabase env vars. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in mobile/.env',
-  );
-}
+export const supabaseConfigError =
+  !supabaseUrl || !supabaseAnonKey
+    ? 'Missing Supabase env vars. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.'
+    : null;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const isSupabaseConfigured = supabaseConfigError === null;
+
+const activeSupabaseUrl = supabaseUrl ?? fallbackSupabaseUrl;
+const activeSupabaseAnonKey = supabaseAnonKey ?? fallbackSupabaseAnonKey;
+
+export const supabase = createClient(activeSupabaseUrl, activeSupabaseAnonKey, {
   auth: {
     storage: authStorage,
     autoRefreshToken: true,
