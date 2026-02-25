@@ -1,7 +1,9 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { create } from 'zustand';
 
-import { isSupabaseConfigured, supabase, supabaseConfigError } from '@/services/supabaseClient';
+import { type BackendAuthSession, signInWithBackend, signUpWithBackend } from '@/services/backendAuth';
+import { setManualAccessToken } from '@/services/backendClient';
+import { isSupabaseConfigured, supabase } from '@/services/supabaseClient';
 
 interface AuthState {
   ready: boolean;
@@ -17,6 +19,30 @@ interface AuthState {
 let initialized = false;
 let listenerBound = false;
 
+const toPseudoSession = (payload: BackendAuthSession): Session => {
+  const expiresAt = payload.expiresAt ?? Math.floor(Date.now() / 1000) + 3600;
+  const expiresIn = Math.max(1, expiresAt - Math.floor(Date.now() / 1000));
+  const userId = payload.user.id || `unknown-${Date.now()}`;
+
+  const user: User = {
+    id: userId,
+    app_metadata: {},
+    user_metadata: {},
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+    email: payload.user.email ?? null,
+  } as User;
+
+  return {
+    access_token: payload.accessToken,
+    refresh_token: payload.refreshToken,
+    token_type: payload.tokenType || 'bearer',
+    expires_at: expiresAt,
+    expires_in: expiresIn,
+    user,
+  } as Session;
+};
+
 export const useAuthStore = create<AuthState>()((set) => ({
   ready: false,
   loading: false,
@@ -28,8 +54,10 @@ export const useAuthStore = create<AuthState>()((set) => ({
       return;
     }
 
+    initialized = true;
+    setManualAccessToken(null);
+
     if (!isSupabaseConfigured) {
-      initialized = true;
       set({
         session: null,
         user: null,
@@ -37,8 +65,6 @@ export const useAuthStore = create<AuthState>()((set) => ({
       });
       return;
     }
-
-    initialized = true;
 
     const { data, error } = await supabase.auth.getSession();
     if (error) {
@@ -56,6 +82,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
       user: data.session?.user ?? null,
       ready: true,
     });
+    setManualAccessToken(data.session?.access_token ?? null);
 
     if (!listenerBound) {
       listenerBound = true;
@@ -65,23 +92,55 @@ export const useAuthStore = create<AuthState>()((set) => ({
           user: session?.user ?? null,
           ready: true,
         });
+        setManualAccessToken(session?.access_token ?? null);
       });
     }
   },
 
   signIn: async (email, password) => {
-    if (!isSupabaseConfigured) {
-      throw new Error(supabaseConfigError ?? 'Supabase is not configured');
-    }
-
+    const normalizedEmail = email.trim().toLowerCase();
     set({ loading: true });
+
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password,
-      });
-      if (error) {
-        throw error;
+      try {
+        const backendSession = await signInWithBackend(normalizedEmail, password);
+        const session = toPseudoSession(backendSession);
+        setManualAccessToken(backendSession.accessToken);
+        set({
+          session,
+          user: session.user,
+          ready: true,
+        });
+
+        if (isSupabaseConfigured) {
+          await supabase.auth
+            .setSession({
+              access_token: backendSession.accessToken,
+              refresh_token: backendSession.refreshToken,
+            })
+            .catch(() => {});
+        }
+        return;
+      } catch (backendError) {
+        if (!isSupabaseConfigured) {
+          throw backendError;
+        }
+
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+
+        if (error || !data.session) {
+          throw error ?? new Error('Authentication failed');
+        }
+
+        setManualAccessToken(null);
+        set({
+          session: data.session,
+          user: data.user ?? null,
+          ready: true,
+        });
       }
     } finally {
       set({ loading: false });
@@ -89,18 +148,49 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 
   signUp: async (email, password) => {
-    if (!isSupabaseConfigured) {
-      throw new Error(supabaseConfigError ?? 'Supabase is not configured');
-    }
-
+    const normalizedEmail = email.trim().toLowerCase();
     set({ loading: true });
+
     try {
-      const { error } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
-        password,
-      });
-      if (error) {
-        throw error;
+      try {
+        const backendSession = await signUpWithBackend(normalizedEmail, password);
+        const session = toPseudoSession(backendSession);
+        setManualAccessToken(backendSession.accessToken);
+        set({
+          session,
+          user: session.user,
+          ready: true,
+        });
+
+        if (isSupabaseConfigured) {
+          await supabase.auth
+            .setSession({
+              access_token: backendSession.accessToken,
+              refresh_token: backendSession.refreshToken,
+            })
+            .catch(() => {});
+        }
+        return;
+      } catch (backendError) {
+        if (!isSupabaseConfigured) {
+          throw backendError;
+        }
+
+        const { data, error } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        setManualAccessToken(null);
+        set({
+          session: data.session,
+          user: data.user ?? null,
+          ready: true,
+        });
       }
     } finally {
       set({ loading: false });
@@ -108,13 +198,15 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 
   signOut: async () => {
-    if (!isSupabaseConfigured) {
-      throw new Error(supabaseConfigError ?? 'Supabase is not configured');
-    }
+    setManualAccessToken(null);
+    set({
+      session: null,
+      user: null,
+      ready: true,
+    });
 
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      throw error;
+    if (isSupabaseConfigured) {
+      await supabase.auth.signOut().catch(() => {});
     }
   },
 }));

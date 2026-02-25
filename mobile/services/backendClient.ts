@@ -3,7 +3,9 @@ import { supabase } from '@/services/supabaseClient';
 import * as Linking from 'expo-linking';
 
 let cachedAccessToken: string | null = null;
+let manualAccessToken: string | null = null;
 let authListenerBound = false;
+const DEPLOYED_BACKEND_BASE_URL = 'https://kiranatrack-backend.onrender.com';
 
 const getConfiguredBaseUrl = (): string | null => {
   const value = process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ?? '';
@@ -12,6 +14,30 @@ const getConfiguredBaseUrl = (): string | null => {
   }
 
   return value.replace(/\/$/, '');
+};
+
+const isPrivateOrLocalHost = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+
+    if (hostname === 'localhost' || hostname.endsWith('.local')) {
+      return true;
+    }
+
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+      return (
+        hostname.startsWith('10.') ||
+        hostname.startsWith('127.') ||
+        hostname.startsWith('192.168.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+      );
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 };
 
 const getInferredExpoBaseUrl = (): string | null => {
@@ -28,13 +54,29 @@ const getInferredExpoBaseUrl = (): string | null => {
 };
 
 const getCandidateBaseUrls = (): string[] => {
+  const urls: string[] = [];
   const configured = getConfiguredBaseUrl();
   if (configured) {
-    return [configured];
+    urls.push(configured);
   }
 
   const inferred = getInferredExpoBaseUrl();
-  return inferred ? [inferred] : [];
+  if (inferred && !urls.includes(inferred)) {
+    urls.push(inferred);
+  }
+
+  if (!configured || isPrivateOrLocalHost(configured)) {
+    if (!urls.includes(DEPLOYED_BACKEND_BASE_URL)) {
+      urls.push(DEPLOYED_BACKEND_BASE_URL);
+    }
+  }
+
+  return urls;
+};
+
+export const setManualAccessToken = (token: string | null): void => {
+  manualAccessToken = token;
+  cachedAccessToken = token;
 };
 
 const ensureAuthListener = (): void => {
@@ -50,6 +92,12 @@ const ensureAuthListener = (): void => {
 
 const getAuthHeader = async (): Promise<Record<string, string>> => {
   ensureAuthListener();
+
+  if (manualAccessToken) {
+    return {
+      Authorization: `Bearer ${manualAccessToken}`,
+    };
+  }
 
   if (cachedAccessToken) {
     return {
@@ -113,3 +161,5 @@ export const resolveBackendBaseUrl = (): string | null => {
   const [first] = getCandidateBaseUrls();
   return first ?? null;
 };
+
+export const resolveBackendBaseUrls = (): string[] => getCandidateBaseUrls();

@@ -11,6 +11,7 @@ import { env } from './config/env';
 import { closeDatabase, connectDatabase, getDatabaseState } from './db/postgres';
 import { authMiddleware } from './middleware/auth';
 import { analyticsRouter } from './routes/analytics';
+import { authRouter } from './routes/auth';
 import { billsRouter } from './routes/bills';
 import { outOfStockRouter } from './routes/outofstock';
 import { parseRouter } from './routes/parse';
@@ -67,6 +68,7 @@ app.get('/health/detailed', (_req, res) => {
   });
 });
 
+app.use('/auth', authRouter);
 app.use('/api/bills', billsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/vendors', vendorsRouter);

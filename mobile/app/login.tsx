@@ -64,6 +64,9 @@ export default function LoginScreen() {
       }
 
       await signUp(normalizedEmail, password);
+      if (useAuthStore.getState().session) {
+        return;
+      }
       Alert.alert(
         'Account created',
         'If email confirmation is enabled in Supabase, verify your email before signing in.',

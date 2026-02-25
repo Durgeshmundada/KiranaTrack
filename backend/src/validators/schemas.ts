@@ -162,3 +162,8 @@ export const parseBillImageSchema = z.object({
 export const parseBillTextSchema = z.object({
   text: z.string().min(1),
 });
+
+export const authCredentialsSchema = z.object({
+  email: z.string().trim().email().max(254),
+  password: z.string().min(6).max(128),
+});
