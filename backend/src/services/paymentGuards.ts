@@ -20,13 +20,16 @@ export const fetchBillFinancialsForUpdate = async (
       select
         b.id,
         b.total_amount_paise,
-        coalesce(sum(p.amount_paise), 0)::int as paid_paise
+        (
+          select coalesce(sum(p.amount_paise), 0)::int
+          from payments p
+          where p.bill_id = b.id
+            and p.deleted_at is null
+        ) as paid_paise
       from bills b
-      left join payments p on p.bill_id = b.id and p.deleted_at is null
       where b.id = $1
         and b.owner_user_id = $2
         and b.deleted_at is null
-      group by b.id, b.total_amount_paise
       for update of b
     `,
     [billId, ownerUserId],
