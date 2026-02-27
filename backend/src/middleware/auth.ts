@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { env } from '../config/env';
-import { claimLegacyOwnership } from '../services/ownerMigration';
 import { HttpError } from '../utils/http';
 
 const AUTH_UPSTREAM_TIMEOUT_MS = env.AUTH_UPSTREAM_TIMEOUT_MS;
@@ -210,10 +209,6 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
       const request = req as AuthenticatedRequest;
       request.authUserId = claims.userId;
       request.authRole = claims.role;
-
-      if (claims.role === 'authenticated') {
-        await claimLegacyOwnership(claims.userId).catch(() => {});
-      }
 
       next();
     } catch {
