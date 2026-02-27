@@ -29,10 +29,16 @@ services:
         value: "60000"
       - key: RATE_LIMIT_MAX
         value: "120"
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "20"
       - key: PARSER_RATE_LIMIT_MAX
         value: "30"
       - key: AUTH_UPSTREAM_TIMEOUT_MS
         value: "1200"
+      - key: AUTH_UPSTREAM_RETRIES
+        value: "2"
+      - key: AUTH_UPSTREAM_RETRY_DELAY_MS
+        value: "250"
       - key: AUTH_CACHE_TTL_MS
         value: "600000"
       - key: DB_POOL_MAX
@@ -41,7 +47,15 @@ services:
         value: "3000"
       - key: DB_QUERY_TIMEOUT_MS
         value: "6000"
+      - key: DB_CONNECT_RETRY_ATTEMPTS
+        value: "8"
+      - key: DB_CONNECT_RETRY_DELAY_MS
+        value: "2000"
       - key: GROQ_TIMEOUT_MS
         value: "15000"
       - key: GROQ_MAX_RETRIES
         value: "1"
+      - key: GROQ_IMAGE_MODEL
+        value: "meta-llama/llama-4-scout-17b-16e-instruct"
+      - key: GROQ_IMAGE_FALLBACK_MODELS
+        sync: false

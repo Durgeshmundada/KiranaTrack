@@ -2,23 +2,26 @@
 
 create table if not exists public.vendors (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
+  owner_user_id text not null,
   name text not null,
   phone text,
   gst_number text,
   default_collector_name text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (name)
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.bills (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
+  owner_user_id text not null,
   bill_number text not null,
   vendor_id text not null references public.vendors(id) on delete restrict,
   date timestamptz not null,
   total_amount_paise integer not null check (total_amount_paise >= 0),
   image_url text not null,
   image_hash text not null,
+  client_request_id text,
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (vendor_id, bill_number)
@@ -42,6 +45,8 @@ create table if not exists public.payments (
   collector_name text,
   mode text not null check (mode in ('cash', 'upi', 'cheque', 'other')),
   notes text,
+  client_request_id text,
+  deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -56,6 +61,7 @@ create table if not exists public.payment_edit_logs (
 
 create table if not exists public.out_of_stock_items (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
+  owner_user_id text not null,
   item_name text not null,
   status text not null check (status in ('pending', 'ordered', 'restocked')),
   created_at timestamptz not null default now(),
@@ -64,6 +70,7 @@ create table if not exists public.out_of_stock_items (
 
 create table if not exists public.udhaar_customers (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
+  owner_user_id text not null,
   customer_name text not null,
   phone text,
   created_at timestamptz not null default now(),
@@ -77,22 +84,93 @@ create table if not exists public.udhaar_entries (
   amount_paise integer not null check (amount_paise > 0),
   description text,
   date timestamptz not null,
+  deleted_at timestamptz,
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.audit_events (
+  id text primary key check (id ~ '^[0-9a-f]{24}$'),
+  owner_user_id text not null,
+  actor_user_id text not null,
+  entity_type text not null check (entity_type in ('bill', 'payment', 'udhaar_entry')),
+  entity_id text not null,
+  action text not null check (action in ('create', 'update', 'delete')),
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table public.vendors add column if not exists owner_user_id text;
+alter table public.bills add column if not exists owner_user_id text;
+alter table public.bills add column if not exists client_request_id text;
+alter table public.bills add column if not exists deleted_at timestamptz;
+alter table public.payments add column if not exists client_request_id text;
+alter table public.payments add column if not exists deleted_at timestamptz;
+alter table public.udhaar_entries add column if not exists deleted_at timestamptz;
+alter table public.out_of_stock_items add column if not exists owner_user_id text;
+alter table public.udhaar_customers add column if not exists owner_user_id text;
+
+update public.vendors
+set owner_user_id = coalesce(owner_user_id, 'legacy-owner')
+where owner_user_id is null;
+update public.bills
+set owner_user_id = coalesce(owner_user_id, 'legacy-owner')
+where owner_user_id is null;
+update public.out_of_stock_items
+set owner_user_id = coalesce(owner_user_id, 'legacy-owner')
+where owner_user_id is null;
+update public.udhaar_customers
+set owner_user_id = coalesce(owner_user_id, 'legacy-owner')
+where owner_user_id is null;
+
+-- Existing installs keep prior data under a temporary legacy owner.
+-- Backend auto-claims these rows to the first authenticated user.
+
+alter table public.vendors alter column owner_user_id set not null;
+alter table public.bills alter column owner_user_id set not null;
+alter table public.out_of_stock_items alter column owner_user_id set not null;
+alter table public.udhaar_customers alter column owner_user_id set not null;
+
+alter table public.vendors drop constraint if exists vendors_name_key;
+drop index if exists ux_vendors_name_ci;
+alter table public.bills drop constraint if exists bills_vendor_id_bill_number_key;
+drop index if exists ux_bills_vendor_image_hash;
+drop index if exists ux_bills_owner_vendor_client_request;
+drop index if exists ux_payments_bill_client_request;
+
 create index if not exists idx_bills_vendor_date on public.bills (vendor_id, date desc);
 create index if not exists idx_bills_date_desc on public.bills (date desc);
-create unique index if not exists ux_vendors_name_ci on public.vendors (lower(name));
+create index if not exists idx_bills_owner_active_date
+  on public.bills (owner_user_id, date desc)
+  where deleted_at is null;
+create index if not exists idx_vendors_owner_created on public.vendors (owner_user_id, created_at desc);
+create unique index if not exists ux_vendors_owner_name_ci on public.vendors (owner_user_id, lower(name));
+create unique index if not exists ux_bills_vendor_bill_number_active
+  on public.bills (vendor_id, bill_number)
+  where deleted_at is null;
 create unique index if not exists ux_bills_vendor_image_hash
   on public.bills (vendor_id, image_hash)
-  where image_hash <> 'pending' and image_hash <> '';
+  where image_hash <> 'pending' and image_hash <> '' and deleted_at is null;
+create unique index if not exists ux_bills_owner_vendor_client_request
+  on public.bills (owner_user_id, vendor_id, client_request_id)
+  where client_request_id is not null and client_request_id <> '' and deleted_at is null;
 create index if not exists idx_bill_line_items_bill on public.bill_line_items (bill_id);
 create index if not exists idx_payments_bill_date on public.payments (bill_id, date desc);
+create index if not exists idx_payments_bill_date_active
+  on public.payments (bill_id, date desc)
+  where deleted_at is null;
+create unique index if not exists ux_payments_bill_client_request
+  on public.payments (bill_id, client_request_id)
+  where client_request_id is not null and client_request_id <> '' and deleted_at is null;
 create index if not exists idx_payments_date_desc on public.payments (date desc);
 create index if not exists idx_payment_logs_payment on public.payment_edit_logs (payment_id, edited_at desc);
-create index if not exists idx_oos_item_status on public.out_of_stock_items (item_name, status);
-create index if not exists idx_udhaar_customers_name on public.udhaar_customers (customer_name);
+create index if not exists idx_oos_owner_item_status on public.out_of_stock_items (owner_user_id, item_name, status);
+create index if not exists idx_udhaar_customers_owner_name on public.udhaar_customers (owner_user_id, customer_name);
 create index if not exists idx_udhaar_entries_customer_date on public.udhaar_entries (customer_id, date desc);
+create index if not exists idx_udhaar_entries_customer_date_active
+  on public.udhaar_entries (customer_id, date desc)
+  where deleted_at is null;
+create index if not exists idx_audit_owner_created on public.audit_events (owner_user_id, created_at desc);
+create index if not exists idx_audit_entity on public.audit_events (entity_type, entity_id, created_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger

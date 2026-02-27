@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isLineItemTotalWithinTolerance } from '../services/billLineItems';
 
 export const objectIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/);
 
@@ -24,19 +25,6 @@ const lineItemSchema = z.object({
   amountPaise: paiseSchema,
 });
 
-const doesLineItemTotalMatch = (
-  totalAmountPaise: number,
-  lineItems: Array<{ amountPaise: number }>,
-): boolean => {
-  if (lineItems.length === 0) {
-    return true;
-  }
-
-  const computedTotal = lineItems.reduce((sum, item) => sum + item.amountPaise, 0);
-  const tolerancePaise = 100; // Allow Rs 1 rounding slack.
-  return Math.abs(computedTotal - totalAmountPaise) <= tolerancePaise;
-};
-
 const billFieldSchema = {
   billNumber: z.string().trim().min(1).max(64),
   vendorId: objectIdSchema,
@@ -44,6 +32,7 @@ const billFieldSchema = {
   totalAmountPaise: paiseSchema.positive(),
   imageUrl: z.string().url(),
   imageHash: z.string().trim().min(1).max(255),
+  clientRequestId: z.string().trim().min(8).max(100).optional(),
 };
 
 export const createBillSchema = z
@@ -52,7 +41,7 @@ export const createBillSchema = z
     lineItems: z.array(lineItemSchema).max(200).default([]),
   })
   .superRefine((value, context) => {
-    if (!doesLineItemTotalMatch(value.totalAmountPaise, value.lineItems)) {
+    if (!isLineItemTotalWithinTolerance(value.totalAmountPaise, value.lineItems)) {
       context.addIssue({
         code: 'custom',
         path: ['lineItems'],
@@ -75,7 +64,7 @@ export const updateBillSchema = z
     if (
       value.totalAmountPaise !== undefined &&
       value.lineItems !== undefined &&
-      !doesLineItemTotalMatch(value.totalAmountPaise, value.lineItems)
+      !isLineItemTotalWithinTolerance(value.totalAmountPaise, value.lineItems)
     ) {
       context.addIssue({
         code: 'custom',
@@ -98,12 +87,27 @@ const booleanQuerySchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+const optionalQueryDateSchema = z.preprocess((value) => {
+  if (typeof value === 'string' && value.trim() === '') {
+    return undefined;
+  }
+  return value;
+}, z.coerce.date());
+
 export const billsQuerySchema = z.object({
   status: z.enum(['unpaid', 'partial', 'cleared', 'overdue']).optional(),
   vendor: objectIdSchema.optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
+  dateFrom: optionalQueryDateSchema.optional(),
+  dateTo: optionalQueryDateSchema.optional(),
   includePayments: booleanQuerySchema.optional().default(false),
+}).superRefine((value, context) => {
+  if (value.dateFrom && value.dateTo && value.dateFrom > value.dateTo) {
+    context.addIssue({
+      code: 'custom',
+      path: ['dateFrom'],
+      message: 'dateFrom cannot be after dateTo',
+    });
+  }
 });
 
 export const createPaymentSchema = z.object({
@@ -112,6 +116,7 @@ export const createPaymentSchema = z.object({
   collectorName: z.string().trim().min(1).max(120).nullable().optional(),
   mode: z.enum(['cash', 'upi', 'cheque', 'other']).default('cash'),
   notes: z.string().trim().max(500).nullable().optional(),
+  clientRequestId: z.string().trim().min(8).max(100).optional(),
 });
 
 export const updatePaymentSchema = z.object({
@@ -160,7 +165,7 @@ export const parseBillImageSchema = z.object({
 });
 
 export const parseBillTextSchema = z.object({
-  text: z.string().min(1),
+  text: z.string().trim().min(1).max(30_000),
 });
 
 export const authCredentialsSchema = z.object({

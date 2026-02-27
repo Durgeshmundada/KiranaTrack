@@ -15,6 +15,7 @@ import { useAppStore } from '@/store/appStore';
 import { useAuthStore } from '@/store/authStore';
 import { radii, typography } from '@/theme/tokens';
 import type { AppLanguage, PaymentMode } from '@/types/models';
+import { resolveUserErrorMessage } from '@/utils/errors';
 import { hasPin, savePin } from '@/utils/pin';
 
 const languageOptions: AppLanguage[] = ['en', 'hi', 'mr'];
@@ -105,8 +106,11 @@ export default function SettingsScreen() {
     try {
       await state.syncAll();
       Alert.alert('Sync complete', 'Latest data pulled from backend.');
-    } catch {
-      Alert.alert('Sync failed', 'Could not refresh data right now.');
+    } catch (error) {
+      Alert.alert(
+        'Sync failed',
+        resolveUserErrorMessage(error, 'Could not refresh data right now.'),
+      );
     } finally {
       setSyncing(false);
     }
@@ -125,8 +129,11 @@ export default function SettingsScreen() {
               await signOut();
               state.resetData();
               router.replace('/login' as never);
-            } catch {
-              Alert.alert('Sign out failed', 'Could not sign out. Please try again.');
+            } catch (error) {
+              Alert.alert(
+                'Sign out failed',
+                resolveUserErrorMessage(error, 'Could not sign out. Please try again.'),
+              );
             } finally {
               setSigningOut(false);
             }

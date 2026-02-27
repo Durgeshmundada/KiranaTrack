@@ -14,7 +14,10 @@ import { customerBalancePaise } from '@/store/selectors';
 import { radii, typography } from '@/theme/tokens';
 import type { UdhaarEntryType } from '@/types/models';
 import { formatINRFromPaise, rupeeToPaise } from '@/utils/currency';
+import { toIsoFromDateInput } from '@/utils/dateInput';
 import { formatDisplayDate } from '@/utils/date';
+import { resolveUserErrorMessage } from '@/utils/errors';
+import { hasPin } from '@/utils/pin';
 
 type EntryFormState = {
   visible: boolean;
@@ -40,6 +43,8 @@ export default function UdhaarDetailScreen() {
 
   const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
   const [showPin, setShowPin] = useState(false);
+  const [savingEntry, setSavingEntry] = useState(false);
+  const [deletingEntry, setDeletingEntry] = useState(false);
 
   const customer = useMemo(() => customers.find((item) => item.id === id), [customers, id]);
 
@@ -71,40 +76,79 @@ export default function UdhaarDetailScreen() {
   };
 
   const submitEntry = async () => {
+    if (savingEntry) {
+      return;
+    }
+
     const numericAmount = Number(amount);
     if (Number.isNaN(numericAmount) || numericAmount <= 0) {
       return;
     }
 
+    const normalizedDate = toIsoFromDateInput(date);
+    if (!normalizedDate) {
+      Alert.alert('Invalid date', 'Enter date in YYYY-MM-DD format.');
+      return;
+    }
+
     try {
+      setSavingEntry(true);
       await addUdhaarEntry(
         customer.id,
         form.type,
         rupeeToPaise(numericAmount),
         description.trim() || null,
-        new Date(`${date}T00:00:00.000Z`).toISOString(),
+        normalizedDate,
       );
       setForm(initialFormState);
-    } catch {
-      Alert.alert('Save failed', 'Could not add entry. Please try again.');
+    } catch (error) {
+      Alert.alert(
+        'Save failed',
+        resolveUserErrorMessage(error, 'Could not add entry. Please try again.'),
+      );
+    } finally {
+      setSavingEntry(false);
     }
   };
 
-  const requestDelete = (entryId: string) => {
+  const requestDelete = async (entryId: string) => {
+    const pinExists = await hasPin();
+    if (!pinExists) {
+      Alert.alert(
+        'PIN not set',
+        'Set a 4-digit PIN in Settings before deleting entries.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => router.push('/settings') },
+        ],
+      );
+      return;
+    }
+
     setEntryToDelete(entryId);
     setShowPin(true);
   };
 
   const onPinVerified = async () => {
+    if (deletingEntry) {
+      return;
+    }
+
     setShowPin(false);
     if (!entryToDelete) {
       return;
     }
     try {
+      setDeletingEntry(true);
       await deleteUdhaarEntry(customer.id, entryToDelete);
       setEntryToDelete(null);
-    } catch {
-      Alert.alert('Delete failed', 'Could not delete entry. Please try again.');
+    } catch (error) {
+      Alert.alert(
+        'Delete failed',
+        resolveUserErrorMessage(error, 'Could not delete entry. Please try again.'),
+      );
+    } finally {
+      setDeletingEntry(false);
     }
   };
 
@@ -150,7 +194,9 @@ export default function UdhaarDetailScreen() {
           entries.map((entry) => (
             <Pressable
               key={entry.id}
-              onLongPress={() => requestDelete(entry.id)}
+              onLongPress={() => {
+                void requestDelete(entry.id);
+              }}
               style={[
                 styles.entryRow,
                 {
@@ -224,7 +270,11 @@ export default function UdhaarDetailScreen() {
               <Pressable style={styles.cancelBtn} onPress={() => setForm(initialFormState)}>
                 <AppText variant="label">{t('cancel')}</AppText>
               </Pressable>
-              <GradientButton label={t('save')} onPress={submitEntry} />
+              <GradientButton
+                label={savingEntry ? 'Saving...' : t('save')}
+                onPress={submitEntry}
+                disabled={savingEntry}
+              />
             </View>
           </GlassCard>
         </View>

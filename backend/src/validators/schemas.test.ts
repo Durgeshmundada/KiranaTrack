@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { createBillSchema, createPaymentSchema, parseBillImageSchema } from './schemas';
+import {
+  billsQuerySchema,
+  createBillSchema,
+  createPaymentSchema,
+  parseBillImageSchema,
+  parseBillTextSchema,
+} from './schemas';
 
 describe('schema validation', () => {
   it('validates payment payload', () => {
@@ -19,6 +25,14 @@ describe('schema validation', () => {
   it('rejects invalid image data URL', () => {
     const result = parseBillImageSchema.safeParse({
       imageDataUrl: 'not-a-data-url',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects oversized OCR text payload', () => {
+    const result = parseBillTextSchema.safeParse({
+      text: 'A'.repeat(30_001),
     });
 
     expect(result.success).toBe(false);
@@ -53,6 +67,15 @@ describe('schema validation', () => {
           amountPaise: 9_000,
         },
       ],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects bills query when dateFrom is after dateTo', () => {
+    const result = billsQuerySchema.safeParse({
+      dateFrom: '2026-02-27',
+      dateTo: '2026-02-20',
     });
 
     expect(result.success).toBe(false);

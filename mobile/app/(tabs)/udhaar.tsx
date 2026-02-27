@@ -15,6 +15,7 @@ import { useAppStore } from '@/store/appStore';
 import { customerBalancePaise } from '@/store/selectors';
 import { radii, typography } from '@/theme/tokens';
 import { formatINRFromPaise } from '@/utils/currency';
+import { resolveUserErrorMessage } from '@/utils/errors';
 
 export default function UdhaarScreen() {
   const [showForm, setShowForm] = useState(false);
@@ -41,8 +42,11 @@ export default function UdhaarScreen() {
       setName('');
       setPhone('');
       setShowForm(false);
-    } catch {
-      Alert.alert('Save failed', 'Could not add customer. Please try again.');
+    } catch (error) {
+      Alert.alert(
+        'Save failed',
+        resolveUserErrorMessage(error, 'Could not add customer. Please try again.'),
+      );
     }
   };
 

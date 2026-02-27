@@ -46,8 +46,12 @@ const mapPgError = (error: PgLikeError): HttpError | null => {
       const byConstraint: Record<string, string> = {
         vendors_name_key: 'Vendor with this name already exists',
         ux_vendors_name_ci: 'Vendor with this name already exists',
+        ux_vendors_owner_name_ci: 'Vendor with this name already exists',
         bills_vendor_id_bill_number_key: 'Bill number already exists for this vendor',
+        ux_bills_vendor_bill_number_active: 'Bill number already exists for this vendor',
         ux_bills_vendor_image_hash: 'This bill image already exists for this vendor',
+        ux_bills_owner_vendor_client_request: 'Duplicate bill request detected',
+        ux_payments_bill_client_request: 'Duplicate payment request detected',
       };
       return new HttpError(
         409,
@@ -77,8 +81,13 @@ export const errorMiddleware = (
   _next: NextFunction,
 ): void => {
   const requestId = req.header('x-request-id') ?? '';
+  const requestContext = `${req.method} ${req.originalUrl} requestId=${requestId || 'n/a'}`;
 
   if (error instanceof HttpError) {
+    if (error.statusCode >= 500) {
+      // eslint-disable-next-line no-console
+      console.error(`[http-error] ${requestContext} status=${error.statusCode} message=${error.message}`);
+    }
     res.status(error.statusCode).json({
       success: false,
       message: error.message,
@@ -88,6 +97,8 @@ export const errorMiddleware = (
   }
 
   if (error instanceof ZodError) {
+    // eslint-disable-next-line no-console
+    console.warn(`[validation-error] ${requestContext} issues=${error.issues.length}`);
     res.status(400).json({
       success: false,
       message: 'Validation failed',
@@ -103,6 +114,12 @@ export const errorMiddleware = (
   if (isPgError(error)) {
     const mapped = mapPgError(error);
     if (mapped) {
+      if (mapped.statusCode >= 500) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[db-error] ${requestContext} status=${mapped.statusCode} code=${error.code ?? 'unknown'} constraint=${error.constraint ?? 'unknown'}`,
+        );
+      }
       res.status(mapped.statusCode).json({
         success: false,
         message: mapped.message,
@@ -111,6 +128,14 @@ export const errorMiddleware = (
       return;
     }
   }
+
+  // eslint-disable-next-line no-console
+  console.error(
+    `[unhandled-error] ${requestContext}`,
+    error instanceof Error
+      ? { name: error.name, message: error.message, stack: error.stack }
+      : { error },
+  );
 
   res.status(500).json({
     success: false,

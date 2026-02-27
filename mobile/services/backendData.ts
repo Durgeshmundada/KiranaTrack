@@ -86,6 +86,9 @@ interface RawUdhaarCustomer {
   createdAt: string;
 }
 
+export const generateClientRequestId = (prefix: string): string =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 const toVendor = (row: RawVendor): Vendor => ({
   id: row._id,
   name: row.name,
@@ -217,6 +220,7 @@ export const createBill = async (payload: {
   totalAmountPaise: number;
   imageUrl: string;
   imageHash: string;
+  clientRequestId?: string;
   lineItems: Array<{
     name: string;
     qty: number;
@@ -226,7 +230,10 @@ export const createBill = async (payload: {
 }): Promise<Bill> => {
   const response = await authApiRequest<ApiEnvelope<RawBill>>('/api/bills', {
     method: 'POST',
-    body: payload,
+    body: {
+      ...payload,
+      clientRequestId: payload.clientRequestId ?? generateClientRequestId('bill'),
+    },
   });
   return toBill(response.data);
 };
@@ -244,6 +251,7 @@ export const addPayment = async (
     date: string;
     collectorName: string | null;
     mode: Payment['mode'];
+    clientRequestId?: string;
     notes?: string | null;
   },
 ): Promise<Payment> => {
@@ -251,7 +259,10 @@ export const addPayment = async (
     `/api/bills/${billId}/payments`,
     {
       method: 'POST',
-      body: payload,
+      body: {
+        ...payload,
+        clientRequestId: payload.clientRequestId ?? generateClientRequestId('payment'),
+      },
     },
   );
   return toPayment(response.data);

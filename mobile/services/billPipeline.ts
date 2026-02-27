@@ -1,4 +1,4 @@
-import { parseBillImageViaBackend } from '@/services/backendParser';
+import { parseBillImageViaBackend, parseBillTextViaBackend } from '@/services/backendParser';
 import { parseBillImageWithGroq, parseBillWithGroq } from '@/services/groqParser';
 import { computeImageHash } from '@/services/imageHash';
 import { runOcrFallback } from '@/services/ocr';
@@ -14,7 +14,7 @@ export const runBillParsingPipeline = async (
   ocrText: string;
   draft: ParsedBillDraft;
   imageHash: string;
-  source: 'backend-vision' | 'groq-vision' | 'groq-text' | 'regex' | 'manual';
+  source: 'backend-vision' | 'backend-text' | 'groq-vision' | 'groq-text' | 'regex' | 'manual';
 }> => {
   const imageHash = await computeImageHash(imageUri);
 
@@ -42,6 +42,18 @@ export const runBillParsingPipeline = async (
   }
 
   const ocrText = await runOcrFallback(imageUri);
+  const backendTextDraft = ocrText
+    ? await parseBillTextViaBackend(ocrText)
+    : null;
+  if (backendTextDraft) {
+    return {
+      ocrText,
+      draft: backendTextDraft,
+      imageHash,
+      source: 'backend-text',
+    };
+  }
+
   const groqTextDraft =
     enableDirectGroqFallback && ocrText
       ? await parseBillWithGroq(ocrText)

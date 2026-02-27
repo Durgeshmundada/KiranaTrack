@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
@@ -11,20 +12,29 @@ type AuthStorage = {
   removeItem: (key: string) => Promise<void>;
 };
 
-const memoryStore = new Map<string, string>();
-
-const memoryStorage: AuthStorage = {
-  getItem: async (key) => memoryStore.get(key) ?? null,
+const authStorage: AuthStorage = {
+  getItem: async (key) => {
+    try {
+      return await AsyncStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
   setItem: async (key, value) => {
-    memoryStore.set(key, value);
+    try {
+      await AsyncStorage.setItem(key, value);
+    } catch {
+      // Ignore storage failures and keep session in-memory at runtime.
+    }
   },
   removeItem: async (key) => {
-    memoryStore.delete(key);
+    try {
+      await AsyncStorage.removeItem(key);
+    } catch {
+      // Ignore storage cleanup failures.
+    }
   },
 };
-
-// Use in-memory auth storage so login is session-only (no persisted login across app relaunch).
-const authStorage: AuthStorage = memoryStorage;
 
 export const supabaseConfigError =
   !supabaseUrl || !supabaseAnonKey
@@ -40,7 +50,7 @@ export const supabase = createClient(activeSupabaseUrl, activeSupabaseAnonKey, {
   auth: {
     storage: authStorage,
     autoRefreshToken: true,
-    persistSession: false,
+    persistSession: true,
     detectSessionInUrl: false,
   },
 });

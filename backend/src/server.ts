@@ -68,7 +68,16 @@ app.get('/health/detailed', (_req, res) => {
   });
 });
 
-app.use('/auth', authRouter);
+app.use(
+  '/auth',
+  rateLimit({
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    max: env.AUTH_RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }),
+  authRouter,
+);
 app.use('/api/bills', billsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/vendors', vendorsRouter);
@@ -90,6 +99,8 @@ app.use(errorMiddleware);
 
 let httpServer: Server | null = null;
 let shuttingDown = false;
+const wait = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
   if (shuttingDown) {
@@ -131,7 +142,31 @@ const start = async (): Promise<void> => {
   // eslint-disable-next-line no-console
   console.log(`Startup config -> db=${dbSource}, auth=${authMode}, env=${env.NODE_ENV}`);
 
-  await connectDatabase();
+  let connected = false;
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= env.DB_CONNECT_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await connectDatabase();
+      connected = true;
+      break;
+    } catch (error) {
+      lastError = error;
+      // eslint-disable-next-line no-console
+      console.error(
+        `Database connect attempt ${attempt}/${env.DB_CONNECT_RETRY_ATTEMPTS} failed`,
+      );
+      if (attempt < env.DB_CONNECT_RETRY_ATTEMPTS) {
+        await wait(env.DB_CONNECT_RETRY_DELAY_MS * attempt);
+      }
+    }
+  }
+
+  if (!connected) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Database connection failed');
+  }
+
   httpServer = app.listen(env.PORT, () => {
     // eslint-disable-next-line no-console
     console.log(`KiranaTrack backend running on http://localhost:${env.PORT}`);

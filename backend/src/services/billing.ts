@@ -22,6 +22,7 @@ export const getPaymentTotalsByBillIds = async (
       select bill_id, coalesce(sum(amount_paise), 0)::int as paid_paise
       from payments
       where bill_id = any($1::text[])
+        and deleted_at is null
       group by bill_id
     `,
     [billIds],

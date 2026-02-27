@@ -145,6 +145,18 @@ const parserTimeoutMs = Math.max(6000, Math.min(env.GROQ_TIMEOUT_MS, 45000));
 const parserMaxAttempts = env.GROQ_MAX_RETRIES + 1;
 const retryableStatusCodes = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
+const buildModelFallbackList = (primaryModel: string, rawFallbackModels: string): string[] => {
+  const models = [
+    primaryModel.trim(),
+    ...rawFallbackModels
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+
+  return [...new Set(models)];
+};
+
 const getAbortSignal = (timeoutMs: number): AbortSignal => {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), timeoutMs);
@@ -204,13 +216,19 @@ export const parseBillImageWithGroq = async (imageDataUrl: string): Promise<Pars
     return null;
   }
 
-  return requestGroqWithRetry({
-    model: env.GROQ_IMAGE_MODEL,
-    maxTokens: 800,
-    messages: [
-      {
-        role: 'system',
-        content: `You are a bill parser.
+  const models = buildModelFallbackList(
+    env.GROQ_IMAGE_MODEL,
+    env.GROQ_IMAGE_FALLBACK_MODELS,
+  );
+
+  for (const model of models) {
+    const parsed = await requestGroqWithRetry({
+      model,
+      maxTokens: 800,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a bill parser.
 Extract structured JSON from Indian supplier bill image.
 Return ONLY valid JSON:
 {
@@ -221,16 +239,23 @@ Return ONLY valid JSON:
   "line_items": [{"name":"string","qty":"number","rate":"number","amount":"number"}]
 }
 No explanation.`,
-      },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Parse this bill image and return only JSON.' },
-          { type: 'image_url', image_url: { url: imageDataUrl } },
-        ],
-      },
-    ],
-  });
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Parse this bill image and return only JSON.' },
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+    });
+
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
 };
 
 export const parseBillTextWithGroq = async (text: string): Promise<ParsedBillDraft | null> => {

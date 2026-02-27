@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -13,10 +13,13 @@ import { SkeletonLoader } from '@/components/ui/SkeletonLoader';
 import { t } from '@/i18n';
 import { runBillParsingPipeline } from '@/services/billPipeline';
 import { ApiError } from '@/services/apiClient';
+import { generateClientRequestId } from '@/services/backendData';
 import { useAppStore } from '@/store/appStore';
 import type { Bill } from '@/types/models';
 import { radii, typography } from '@/theme/tokens';
 import { formatINRFromPaise, rupeeToPaise } from '@/utils/currency';
+import { toIsoFromDateInput } from '@/utils/dateInput';
+import { resolveUserErrorMessage } from '@/utils/errors';
 
 const todayIso = () => new Date().toISOString();
 const lineItemTotal = (lineItems: Bill['lineItems']): number =>
@@ -39,16 +42,10 @@ export default function ScanBillScreen() {
   const [date, setDate] = useState(todayIso().slice(0, 10));
   const [totalRupee, setTotalRupee] = useState('');
   const [imageHash, setImageHash] = useState('');
+  const [billRequestId, setBillRequestId] = useState<string | null>(null);
   const [parsedLineItems, setParsedLineItems] = useState<Bill['lineItems']>([]);
 
   const hasEditableDraft = Boolean(imageUri && vendorName && totalRupee);
-
-  const normalizedIsoDate = useMemo(() => {
-    if (!date) {
-      return todayIso();
-    }
-    return new Date(`${date}T00:00:00.000Z`).toISOString();
-  }, [date]);
 
   const pickFromGallery = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -60,6 +57,7 @@ export default function ScanBillScreen() {
     }
     setImageUri(result.assets[0]?.uri ?? null);
     setParsedLineItems([]);
+    setBillRequestId(generateClientRequestId('bill'));
   };
 
   const captureFromCamera = async () => {
@@ -77,6 +75,7 @@ export default function ScanBillScreen() {
     }
     setImageUri(result.assets[0]?.uri ?? null);
     setParsedLineItems([]);
+    setBillRequestId(generateClientRequestId('bill'));
   };
 
   const parseSelectedBill = async () => {
@@ -143,6 +142,12 @@ export default function ScanBillScreen() {
       return;
     }
 
+    const normalizedIsoDate = toIsoFromDateInput(date);
+    if (!normalizedIsoDate) {
+      Alert.alert('Invalid date', 'Enter bill date in YYYY-MM-DD format.');
+      return;
+    }
+
     try {
       const totalAmountPaise = rupeeToPaise(totalAmount);
       const parsedTotalPaise = lineItemTotal(parsedLineItems);
@@ -167,12 +172,16 @@ export default function ScanBillScreen() {
         totalAmountPaise,
         imageUrl: imageUri,
         imageHash: imageHash || 'pending',
+        clientRequestId: billRequestId ?? generateClientRequestId('bill'),
         lineItems: lineItemsToSave,
       });
 
       router.replace(`/bill/${bill.id}`);
-    } catch {
-      Alert.alert('Save failed', 'Could not save bill to backend. Please try again.');
+    } catch (error) {
+      Alert.alert(
+        'Save failed',
+        resolveUserErrorMessage(error, 'Could not save bill to backend. Please try again.'),
+      );
     }
   };
 

@@ -1,11 +1,19 @@
 import { ApiError, apiRequest, type RequestOptions } from '@/services/apiClient';
-import { supabase } from '@/services/supabaseClient';
+import { isSupabaseConfigured, supabase } from '@/services/supabaseClient';
 import * as Linking from 'expo-linking';
 
 let cachedAccessToken: string | null = null;
 let manualAccessToken: string | null = null;
+let manualRefreshToken: string | null = null;
 let authListenerBound = false;
-const DEPLOYED_BACKEND_BASE_URL = 'https://kiranatrack-backend.onrender.com';
+let preferredBaseUrl: string | null = null;
+const failedBaseUrls = new Map<string, number>();
+const BASE_URL_FAILURE_COOLDOWN_MS = 30_000;
+const enableBackendFallback =
+  process.env.EXPO_PUBLIC_ENABLE_BACKEND_FALLBACK === 'true';
+const fallbackBackendBaseUrl = (
+  process.env.EXPO_PUBLIC_FALLBACK_API_BASE_URL?.trim() ?? ''
+).replace(/\/$/, '');
 
 const getConfiguredBaseUrl = (): string | null => {
   const value = process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ?? '';
@@ -60,23 +68,94 @@ const getCandidateBaseUrls = (): string[] => {
     urls.push(configured);
   }
 
-  const inferred = getInferredExpoBaseUrl();
-  if (inferred && !urls.includes(inferred)) {
-    urls.push(inferred);
+  if (!configured) {
+    const inferred = getInferredExpoBaseUrl();
+    if (inferred && !urls.includes(inferred)) {
+      urls.push(inferred);
+    }
   }
 
-  if (!configured || isPrivateOrLocalHost(configured)) {
-    if (!urls.includes(DEPLOYED_BACKEND_BASE_URL)) {
-      urls.push(DEPLOYED_BACKEND_BASE_URL);
-    }
+  if (
+    enableBackendFallback &&
+    fallbackBackendBaseUrl &&
+    (!configured || isPrivateOrLocalHost(configured)) &&
+    !urls.includes(fallbackBackendBaseUrl)
+  ) {
+    urls.push(fallbackBackendBaseUrl);
   }
 
   return urls;
 };
 
-export const setManualAccessToken = (token: string | null): void => {
+const dedupeBaseUrls = (urls: string[]): string[] =>
+  [...new Set(urls.filter((value) => Boolean(value.trim())))];
+
+const orderCandidateBaseUrls = (urls: string[]): string[] => {
+  const deduped = dedupeBaseUrls(urls);
+  if (deduped.length === 0) {
+    return deduped;
+  }
+
+  const now = Date.now();
+  const currentlyReachable = deduped.filter((url) => {
+    const blockedUntil = failedBaseUrls.get(url) ?? 0;
+    return blockedUntil <= now;
+  });
+  const prioritizedPool = currentlyReachable.length > 0 ? currentlyReachable : deduped;
+
+  if (preferredBaseUrl && prioritizedPool.includes(preferredBaseUrl)) {
+    return [
+      preferredBaseUrl,
+      ...prioritizedPool.filter((url) => url !== preferredBaseUrl),
+    ];
+  }
+
+  return prioritizedPool;
+};
+
+const shouldMarkBaseUrlFailed = (error: unknown): boolean => {
+  if (!(error instanceof ApiError)) {
+    return true;
+  }
+
+  if (error.status >= 500) {
+    return true;
+  }
+
+  return error.status === 408 || error.status === 429;
+};
+
+export const reportBackendBaseUrlSuccess = (baseUrl: string): void => {
+  preferredBaseUrl = baseUrl;
+  failedBaseUrls.delete(baseUrl);
+};
+
+export const reportBackendBaseUrlFailure = (
+  baseUrl: string,
+  error: unknown,
+): void => {
+  if (!shouldMarkBaseUrlFailed(error)) {
+    return;
+  }
+
+  failedBaseUrls.set(baseUrl, Date.now() + BASE_URL_FAILURE_COOLDOWN_MS);
+};
+
+const getOrderedBackendBaseUrls = (): string[] =>
+  orderCandidateBaseUrls(getCandidateBaseUrls());
+
+export const setManualAccessToken = (
+  token: string | null,
+  refreshToken?: string | null,
+): void => {
   manualAccessToken = token;
   cachedAccessToken = token;
+  if (refreshToken !== undefined) {
+    manualRefreshToken = refreshToken;
+  }
+  if (!token) {
+    manualRefreshToken = null;
+  }
 };
 
 const ensureAuthListener = (): void => {
@@ -87,6 +166,7 @@ const ensureAuthListener = (): void => {
   authListenerBound = true;
   supabase.auth.onAuthStateChange((_event, session) => {
     cachedAccessToken = session?.access_token ?? null;
+    manualRefreshToken = session?.refresh_token ?? manualRefreshToken;
   });
 };
 
@@ -103,6 +183,10 @@ const getAuthHeader = async (): Promise<Record<string, string>> => {
     return {
       Authorization: `Bearer ${cachedAccessToken}`,
     };
+  }
+
+  if (!isSupabaseConfigured) {
+    throw new ApiError('Authentication required', 401, null);
   }
 
   const { data, error } = await supabase.auth.getSession();
@@ -122,11 +206,43 @@ const getAuthHeader = async (): Promise<Record<string, string>> => {
   };
 };
 
+const tryRefreshAuthHeader = async (): Promise<Record<string, string> | null> => {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  const { data, error } = await supabase.auth.refreshSession(
+    manualRefreshToken
+      ? {
+          refresh_token: manualRefreshToken,
+        }
+      : undefined,
+  );
+  if (error) {
+    return null;
+  }
+
+  const token = data.session?.access_token ?? null;
+  const refreshToken = data.session?.refresh_token ?? null;
+  if (!token) {
+    return null;
+  }
+
+  cachedAccessToken = token;
+  manualAccessToken = token;
+  if (refreshToken) {
+    manualRefreshToken = refreshToken;
+  }
+  return {
+    Authorization: `Bearer ${token}`,
+  };
+};
+
 export const authApiRequest = async <T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> => {
-  const baseUrls = getCandidateBaseUrls();
+  const baseUrls = getOrderedBackendBaseUrls();
   if (baseUrls.length === 0) {
     throw new Error('EXPO_PUBLIC_API_BASE_URL is not configured');
   }
@@ -137,16 +253,44 @@ export const authApiRequest = async <T>(
 
   for (const baseUrl of baseUrls) {
     try {
-      return await apiRequest<T>(`${baseUrl}${path}`, {
+      const response = await apiRequest<T>(`${baseUrl}${path}`, {
         ...options,
         headers: {
           ...(options.headers ?? {}),
           ...authHeader,
         },
       });
+      reportBackendBaseUrlSuccess(baseUrl);
+      return response;
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        const refreshedHeader = await tryRefreshAuthHeader();
+        if (refreshedHeader) {
+          try {
+            const refreshedResponse = await apiRequest<T>(`${baseUrl}${path}`, {
+              ...options,
+              headers: {
+                ...(options.headers ?? {}),
+                ...refreshedHeader,
+              },
+            });
+            reportBackendBaseUrlSuccess(baseUrl);
+            return refreshedResponse;
+          } catch (refreshError) {
+            error = refreshError;
+          }
+        }
+      }
+
+      reportBackendBaseUrlFailure(baseUrl, error);
       lastError = error;
       if (error instanceof ApiError) {
+        if (error.status === 401) {
+          throw new ApiError('Session expired. Please sign in again.', 401, error.payload);
+        }
+        if (error.status >= 500) {
+          continue;
+        }
         throw error;
       }
     }
@@ -158,8 +302,8 @@ export const authApiRequest = async <T>(
 };
 
 export const resolveBackendBaseUrl = (): string | null => {
-  const [first] = getCandidateBaseUrls();
+  const [first] = getOrderedBackendBaseUrls();
   return first ?? null;
 };
 
-export const resolveBackendBaseUrls = (): string[] => getCandidateBaseUrls();
+export const resolveBackendBaseUrls = (): string[] => getOrderedBackendBaseUrls();

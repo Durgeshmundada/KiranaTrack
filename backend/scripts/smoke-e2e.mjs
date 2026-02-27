@@ -31,11 +31,50 @@ const backendEnv = dotenv.parse(fs.readFileSync(backendEnvPath));
 const mobileEnv = dotenv.parse(fs.readFileSync(mobileEnvPath));
 
 const apiBaseUrl = 'http://localhost:4000';
+const retryableStatuses = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 const assertStatus = (name, actualStatus, expectedStatuses) => {
   if (!expectedStatuses.includes(actualStatus)) {
     throw new Error(`${name} failed. Expected ${expectedStatuses.join('/')} got ${actualStatus}`);
   }
+};
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const shouldRetrySupabaseError = (error) => {
+  if (!error) {
+    return false;
+  }
+
+  if (typeof error.status === 'number' && retryableStatuses.has(error.status)) {
+    return true;
+  }
+
+  const message = String(error.message ?? '').toLowerCase();
+  return message.includes('timeout') || message.includes('network') || message.includes('fetch');
+};
+
+const runSupabaseCallWithRetry = async (fn, attempts = 3) => {
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const result = await fn();
+      lastResult = result;
+
+      if (!shouldRetrySupabaseError(result.error) || attempt >= attempts) {
+        return result;
+      }
+    } catch (error) {
+      if (attempt >= attempts) {
+        throw error;
+      }
+    }
+
+    await wait(350 * attempt);
+  }
+
+  return lastResult;
 };
 
 const requestJson = async (token, method, endpoint, body) => {
@@ -81,11 +120,13 @@ const run = async () => {
   const email = `smoke_${Date.now()}@example.com`;
   const password = 'SmokeTest@12345';
 
-  const created = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
+  const created = await runSupabaseCallWithRetry(() =>
+    admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    }),
+  );
 
   if (created.error || !created.data.user) {
     throw new Error(`createUser failed: ${created.error?.message ?? 'unknown error'}`);
@@ -94,7 +135,9 @@ const run = async () => {
   const userId = created.data.user.id;
 
   try {
-    const signed = await anon.auth.signInWithPassword({ email, password });
+    const signed = await runSupabaseCallWithRetry(() =>
+      anon.auth.signInWithPassword({ email, password }),
+    );
     if (signed.error || !signed.data.session?.access_token) {
       throw new Error(`signIn failed: ${signed.error?.message ?? 'no session token'}`);
     }

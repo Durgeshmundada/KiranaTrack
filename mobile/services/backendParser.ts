@@ -11,14 +11,14 @@ const PARSE_IMAGE_COMPRESS = 0.55;
 const parseTimeoutMs = (() => {
   const raw = Number(process.env.EXPO_PUBLIC_PARSER_TIMEOUT_MS ?? '');
   if (!Number.isFinite(raw)) {
-    return 15000;
+    return 22000;
   }
-  return Math.min(Math.max(raw, 8000), 30000);
+  return Math.min(Math.max(raw, 10000), 45000);
 })();
 const parseRetries = (() => {
   const raw = Number(process.env.EXPO_PUBLIC_PARSER_RETRIES ?? '');
   if (!Number.isInteger(raw)) {
-    return 0;
+    return 1;
   }
   return Math.min(Math.max(raw, 0), 2);
 })();
@@ -32,11 +32,6 @@ const getMimeType = (imageUri: string): string => {
     return 'image/webp';
   }
   return 'image/jpeg';
-};
-
-const getBaseUrl = (): string | null => {
-  const value = process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ?? '';
-  return value ? value.replace(/\/$/, '') : null;
 };
 
 const hasMeaningfulBillData = (
@@ -90,11 +85,6 @@ const optimizeImageForBackendParse = async (
 };
 
 export const parseBillImageViaBackend = async (imageUri: string): Promise<ParsedBillDraft | null> => {
-  const baseUrl = getBaseUrl();
-  if (!baseUrl) {
-    return null;
-  }
-
   const optimized = await optimizeImageForBackendParse(imageUri);
 
   const base64 = await FileSystem.readAsStringAsync(optimized.uri, {
@@ -124,5 +114,35 @@ export const parseBillImageViaBackend = async (imageUri: string): Promise<Parsed
     if (optimized.shouldCleanup) {
       await FileSystem.deleteAsync(optimized.uri, { idempotent: true }).catch(() => {});
     }
+  }
+};
+
+export const parseBillTextViaBackend = async (
+  text: string,
+): Promise<ParsedBillDraft | null> => {
+  const normalized = text.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    const payload = await authApiRequest<{ success?: boolean; data?: ParsedBillDraft }>(
+      '/api/parse/bill-text',
+      {
+        method: 'POST',
+        body: {
+          text: normalized.length > 30_000 ? normalized.slice(0, 30_000) : normalized,
+        },
+        timeoutMs: parseTimeoutMs,
+        retries: parseRetries,
+        retryDelayMs: 500,
+      },
+    );
+    return hasMeaningfulBillData(payload.data) ? payload.data : null;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      throw error;
+    }
+    return null;
   }
 };

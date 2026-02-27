@@ -12,6 +12,7 @@ import { t } from '@/i18n';
 import { useAppStore } from '@/store/appStore';
 import { radii, typography } from '@/theme/tokens';
 import { formatDisplayDate } from '@/utils/date';
+import { resolveUserErrorMessage } from '@/utils/errors';
 
 const statusLabelMap: Record<'pending' | 'ordered' | 'restocked', string> = {
   pending: t('pending'),
@@ -43,8 +44,11 @@ export default function NotepadScreen() {
       await addOutOfStockItem(input);
       setInput('');
       setShowInput(false);
-    } catch {
-      Alert.alert('Save failed', 'Could not add item. Please try again.');
+    } catch (error) {
+      Alert.alert(
+        'Save failed',
+        resolveUserErrorMessage(error, 'Could not add item. Please try again.'),
+      );
     }
   };
 
@@ -60,8 +64,11 @@ export default function NotepadScreen() {
         onPress: async () => {
           try {
             await clearOutOfStock();
-          } catch {
-            Alert.alert('Delete failed', 'Could not clear items. Please try again.');
+          } catch (error) {
+            Alert.alert(
+              'Delete failed',
+              resolveUserErrorMessage(error, 'Could not clear items. Please try again.'),
+            );
           }
         },
       },
@@ -122,8 +129,11 @@ export default function NotepadScreen() {
                   onPress={async () => {
                     try {
                       await cycleOutOfStock(item.id);
-                    } catch {
-                      Alert.alert('Update failed', 'Could not update status. Please try again.');
+                    } catch (error) {
+                      Alert.alert(
+                        'Update failed',
+                        resolveUserErrorMessage(error, 'Could not update status. Please try again.'),
+                      );
                     }
                   }}
                   style={[styles.statusBtn, { backgroundColor: statusColorMap[item.status] }]}>
@@ -138,8 +148,11 @@ export default function NotepadScreen() {
                 onPress={async () => {
                   try {
                     await deleteOutOfStockItem(item.id);
-                  } catch {
-                    Alert.alert('Delete failed', 'Could not delete item. Please try again.');
+                  } catch (error) {
+                    Alert.alert(
+                      'Delete failed',
+                      resolveUserErrorMessage(error, 'Could not delete item. Please try again.'),
+                    );
                   }
                 }}>
                 <Feather name="trash" size={14} color="#FCA5A5" />

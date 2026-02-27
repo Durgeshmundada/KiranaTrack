@@ -33,7 +33,9 @@ export default function RootLayout() {
   const bootstrap = useAppStore((state) => state.bootstrap);
   const resetData = useAppStore((state) => state.resetData);
   const setOffline = useAppStore((state) => state.setOffline);
+  const syncAll = useAppStore((state) => state.syncAll);
   const lockOnOpen = useAppStore((state) => state.settings.lockOnOpen);
+  const dataOwnerUserId = useAppStore((state) => state.ownerUserId);
   const authReady = useAuthStore((state) => state.ready);
   const session = useAuthStore((state) => state.session);
   const initializeAuth = useAuthStore((state) => state.initialize);
@@ -42,6 +44,8 @@ export default function RootLayout() {
   const [isLocked, setIsLocked] = useState(false);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const launchRedirectHandledRef = useRef(false);
+  const previousAuthUserRef = useRef<string | null>(null);
+  const previousOnlineRef = useRef<boolean | null>(null);
 
   const [loaded, error] = useFonts({
     Syne_600SemiBold,
@@ -75,17 +79,24 @@ export default function RootLayout() {
     const hydrate = async () => {
       try {
         if (authUserId) {
-          await bootstrap();
-        } else {
+          if (
+            previousAuthUserRef.current &&
+            previousAuthUserRef.current !== authUserId
+          ) {
+            resetData();
+          }
+          await bootstrap(authUserId);
+        } else if (previousAuthUserRef.current || dataOwnerUserId) {
           resetData();
         }
+        previousAuthUserRef.current = authUserId;
       } finally {
         await SplashScreen.hideAsync();
       }
     };
 
     void hydrate();
-  }, [authReady, authUserId, bootstrap, loaded, resetData]);
+  }, [authReady, authUserId, bootstrap, dataOwnerUserId, loaded, resetData]);
 
   useEffect(() => {
     if (!loaded || !authReady) {
@@ -121,10 +132,17 @@ export default function RootLayout() {
     const unsubscribe = NetInfo.addEventListener((state) => {
       const online = Boolean(state.isConnected) && state.isInternetReachable !== false;
       setOffline(!online);
+      const wasOnline = previousOnlineRef.current;
+      if (wasOnline === false && online && authUserId) {
+        void syncAll().catch(() => {
+          // Keep reconnect sync non-fatal. User can retry manually if needed.
+        });
+      }
+      previousOnlineRef.current = online;
     });
 
     return unsubscribe;
-  }, [setOffline]);
+  }, [authUserId, setOffline, syncAll]);
 
   useEffect(() => {
     const evaluateLock = async () => {

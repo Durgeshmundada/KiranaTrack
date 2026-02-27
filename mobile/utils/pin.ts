@@ -9,6 +9,8 @@ const LOCKOUT_MINUTES = 10;
 
 const hashPin = async (pin: string): Promise<string> =>
   Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `kiranatrack:${pin}`);
+const legacyHashPin = async (pin: string): Promise<string> =>
+  Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, pin);
 
 const getAttempts = async (): Promise<number> => {
   const value = await SecureStore.getItemAsync(PIN_ATTEMPTS_KEY);
@@ -42,7 +44,8 @@ export const getRemainingLockoutSeconds = async (): Promise<number> => {
 };
 
 export const savePin = async (pin: string): Promise<void> => {
-  const hash = await hashPin(pin);
+  const normalizedPin = pin.trim();
+  const hash = await hashPin(normalizedPin);
   await SecureStore.setItemAsync(PIN_HASH_KEY, hash);
   await clearAttempts();
   await SecureStore.deleteItemAsync(PIN_LOCKOUT_KEY);
@@ -56,6 +59,7 @@ export const hasPin = async (): Promise<boolean> => {
 export const verifyPin = async (
   pin: string,
 ): Promise<{ ok: boolean; remainingLockoutSeconds: number }> => {
+  const normalizedPin = pin.trim();
   const remaining = await getRemainingLockoutSeconds();
   if (remaining > 0) {
     return { ok: false, remainingLockoutSeconds: remaining };
@@ -66,8 +70,13 @@ export const verifyPin = async (
     return { ok: false, remainingLockoutSeconds: 0 };
   }
 
-  const incomingHash = await hashPin(pin);
-  if (incomingHash === storedHash) {
+  const incomingHash = await hashPin(normalizedPin);
+  const legacyIncomingHash = await legacyHashPin(normalizedPin);
+  if (incomingHash === storedHash || legacyIncomingHash === storedHash) {
+    // Migrate any legacy hash format to the latest salted format.
+    if (legacyIncomingHash === storedHash) {
+      await SecureStore.setItemAsync(PIN_HASH_KEY, incomingHash);
+    }
     await clearAttempts();
     await SecureStore.deleteItemAsync(PIN_LOCKOUT_KEY);
     return { ok: true, remainingLockoutSeconds: 0 };

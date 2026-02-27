@@ -1,34 +1,36 @@
 import { Router } from 'express';
 
-import { type BillRow, type VendorRow, toVendorDoc } from '../db/mappers';
 import { dbQuery } from '../db/postgres';
-import { attachBillSummaries, getPaymentTotalsByBillIds } from '../services/billing';
 import { asyncHandler } from '../utils/asyncHandler';
+import { getAuthUserId } from '../utils/authContext';
 import { sendOk } from '../utils/http';
 
 const analyticsRouter = Router();
 
 analyticsRouter.get(
   '/summary',
-  asyncHandler(async (_req, res) => {
-    const bills = await dbQuery<Pick<BillRow, 'id' | 'total_amount_paise' | 'date'>>(
+  asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
+    const outstanding = await dbQuery<{ outstanding_paise: number }>(
       `
-        select id, total_amount_paise, date
-        from bills
+        select coalesce(
+          sum(greatest(b.total_amount_paise - coalesce(p.paid_paise, 0), 0)),
+          0
+        )::int as outstanding_paise
+        from bills b
+        left join (
+          select bill_id, coalesce(sum(amount_paise), 0)::int as paid_paise
+          from payments
+          where deleted_at is null
+          group by bill_id
+        ) p on p.bill_id = b.id
+        where b.owner_user_id = $1
+          and b.deleted_at is null
       `,
+      [ownerUserId],
     );
 
-    const normalizedBills = bills.rows.map((bill) => ({
-      _id: bill.id,
-      totalAmountPaise: bill.total_amount_paise,
-      date: bill.date instanceof Date ? bill.date : new Date(bill.date),
-    }));
-
-    const paidByBill = await getPaymentTotalsByBillIds(
-      normalizedBills.map((bill) => bill._id),
-    );
-    const summarized = attachBillSummaries(normalizedBills, paidByBill, 30);
-    const outstandingPaise = summarized.reduce((sum, bill) => sum + bill.remainingPaise, 0);
+    const outstandingPaise = outstanding.rows[0]?.outstanding_paise ?? 0;
 
     const receivable = await dbQuery<{ receivable_paise: number }>(
       `
@@ -42,8 +44,12 @@ analyticsRouter.get(
           ),
           0
         )::int as receivable_paise
-        from udhaar_entries
+        from udhaar_entries ue
+        join udhaar_customers uc on uc.id = ue.customer_id
+        where uc.owner_user_id = $1
+          and ue.deleted_at is null
       `,
+      [ownerUserId],
     );
 
     const receivablePaise = receivable.rows[0]?.receivable_paise ?? 0;
@@ -58,48 +64,41 @@ analyticsRouter.get(
 
 analyticsRouter.get(
   '/vendor-wise',
-  asyncHandler(async (_req, res) => {
-    const [vendors, bills] = await Promise.all([
-      dbQuery<VendorRow>(
-        `
-          select id, name, phone, gst_number, default_collector_name, created_at, updated_at
-          from vendors
-        `,
-      ),
-      dbQuery<Pick<BillRow, 'id' | 'vendor_id' | 'total_amount_paise' | 'date'>>(
-        `
-          select id, vendor_id, total_amount_paise, date
-          from bills
-        `,
-      ),
-    ]);
+  asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
+    const grouped = await dbQuery<{
+      vendor_id: string;
+      vendor_name: string | null;
+      outstanding_paise: number;
+    }>(
+      `
+        select
+          v.id as vendor_id,
+          v.name as vendor_name,
+          coalesce(
+            sum(greatest(b.total_amount_paise - coalesce(p.paid_paise, 0), 0)),
+            0
+          )::int as outstanding_paise
+        from vendors v
+        left join bills b on b.vendor_id = v.id and b.deleted_at is null
+        left join (
+          select bill_id, coalesce(sum(amount_paise), 0)::int as paid_paise
+          from payments
+          where deleted_at is null
+          group by bill_id
+        ) p on p.bill_id = b.id
+        where v.owner_user_id = $1
+        group by v.id, v.name
+        order by outstanding_paise desc
+      `,
+      [ownerUserId],
+    );
 
-    const vendorMap = vendors.rows.reduce((map, vendor) => {
-      map.set(vendor.id, toVendorDoc(vendor).name);
-      return map;
-    }, new Map<string, string>());
-
-    const normalizedBills = bills.rows.map((bill) => ({
-      _id: bill.id,
-      vendorId: bill.vendor_id,
-      totalAmountPaise: bill.total_amount_paise,
-      date: bill.date instanceof Date ? bill.date : new Date(bill.date),
-    }));
-
-    const paidByBill = await getPaymentTotalsByBillIds(normalizedBills.map((bill) => bill._id));
-    const summarized = attachBillSummaries(normalizedBills, paidByBill, 30);
-
-    const grouped = summarized.reduce((map, bill) => {
-      const vendorId = String(bill.vendorId);
-      map.set(vendorId, (map.get(vendorId) ?? 0) + bill.remainingPaise);
-      return map;
-    }, new Map<string, number>());
-
-    const data = [...grouped.entries()]
-      .map(([vendorId, outstandingPaise]) => ({
-        vendorId,
-        vendorName: vendorMap.get(vendorId) ?? 'Unknown',
-        outstandingPaise,
+    const data = grouped.rows
+      .map((row) => ({
+        vendorId: row.vendor_id,
+        vendorName: row.vendor_name ?? 'Unknown',
+        outstandingPaise: row.outstanding_paise,
       }))
       .sort((a, b) => b.outstandingPaise - a.outstandingPaise);
 
@@ -109,7 +108,8 @@ analyticsRouter.get(
 
 analyticsRouter.get(
   '/monthly-spend',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const monthly = await dbQuery<{
       year: number;
       month: number;
@@ -117,13 +117,18 @@ analyticsRouter.get(
     }>(
       `
         select
-          extract(year from date)::int as year,
-          extract(month from date)::int as month,
-          coalesce(sum(amount_paise), 0)::int as total_paid_paise
-        from payments
+          extract(year from p.date)::int as year,
+          extract(month from p.date)::int as month,
+          coalesce(sum(p.amount_paise), 0)::int as total_paid_paise
+        from payments p
+        join bills b on b.id = p.bill_id
+        where b.owner_user_id = $1
+          and b.deleted_at is null
+          and p.deleted_at is null
         group by year, month
         order by year asc, month asc
       `,
+      [ownerUserId],
     );
 
     const data = monthly.rows.slice(-6).map((item) => ({
@@ -137,7 +142,8 @@ analyticsRouter.get(
 
 analyticsRouter.get(
   '/price-anomalies',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     type ItemRatePoint = {
       date: Date;
       ratePaise: number;
@@ -165,8 +171,11 @@ analyticsRouter.get(
         from bills b
         left join vendors v on v.id = b.vendor_id
         join bill_line_items li on li.bill_id = b.id
+        where b.owner_user_id = $1
+          and b.deleted_at is null
         order by b.date asc
       `,
+      [ownerUserId],
     );
 
     const grouped = new Map<string, ItemRatePoint[]>();

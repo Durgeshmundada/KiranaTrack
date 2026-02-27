@@ -17,12 +17,15 @@ import {
   toVendorDoc,
 } from '../db/mappers';
 import { dbQuery, withTransaction } from '../db/postgres';
+import { recordAuditEvent } from '../services/audit';
+import { isLineItemTotalWithinTolerance } from '../services/billLineItems';
 import { attachBillSummaries, getPaymentTotalsByBillIds } from '../services/billing';
 import {
   assertPaymentWithinBillLimit,
   fetchBillFinancialsForUpdate,
 } from '../services/paymentGuards';
 import { asyncHandler } from '../utils/asyncHandler';
+import { getAuthUserId } from '../utils/authContext';
 import { HttpError, notFound, parseBody, parseQuery, sendCreated, sendOk } from '../utils/http';
 import {
   billsQuerySchema,
@@ -39,6 +42,22 @@ const idParamSchema = z.object({
 const billsRouter = Router();
 type PaymentDoc = ReturnType<typeof toPaymentDoc>;
 type PaymentEditLogDoc = ReturnType<typeof toPaymentEditLogDoc>;
+type PgLikeError = {
+  code?: string;
+  constraint?: string;
+};
+
+const isUniqueConstraintError = (
+  error: unknown,
+  constraint: string,
+): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const pgError = error as PgLikeError;
+  return pgError.code === '23505' && pgError.constraint === constraint;
+};
 
 const fetchLineItemsByBillIds = async (
   billIds: string[],
@@ -68,7 +87,10 @@ const fetchLineItemsByBillIds = async (
   return map;
 };
 
-const fetchVendorsByIds = async (vendorIds: string[]): Promise<Map<string, VendorDoc>> => {
+const fetchVendorsByIds = async (
+  vendorIds: string[],
+  ownerUserId: string,
+): Promise<Map<string, VendorDoc>> => {
   const map = new Map<string, VendorDoc>();
 
   if (vendorIds.length === 0) {
@@ -80,8 +102,9 @@ const fetchVendorsByIds = async (vendorIds: string[]): Promise<Map<string, Vendo
       select id, name, phone, gst_number, default_collector_name, created_at, updated_at
       from vendors
       where id = any($1::text[])
+        and owner_user_id = $2
     `,
-    [vendorIds],
+    [vendorIds, ownerUserId],
   );
 
   vendors.rows.forEach((vendor) => {
@@ -94,11 +117,12 @@ const fetchVendorsByIds = async (vendorIds: string[]): Promise<Map<string, Vendo
 const buildBillDocs = async (
   billRows: BillRow[],
   populateVendor: boolean,
+  ownerUserId: string,
 ) => {
   const billIds = billRows.map((row) => row.id);
   const lineItemsByBill = await fetchLineItemsByBillIds(billIds);
   const vendorsById = populateVendor
-    ? await fetchVendorsByIds([...new Set(billRows.map((row) => row.vendor_id))])
+    ? await fetchVendorsByIds([...new Set(billRows.map((row) => row.vendor_id))], ownerUserId)
     : new Map<string, VendorDoc>();
 
   return billRows.map((row) =>
@@ -190,6 +214,7 @@ const fetchPaymentsByBillIds = async (
       select id, bill_id, amount_paise, date, collector_name, mode, notes, created_at, updated_at
       from payments
       where bill_id = any($1::text[])
+        and deleted_at is null
       order by date desc
     `,
     [billIds],
@@ -215,15 +240,38 @@ const fetchPaymentsForBill = async (billId: string): Promise<PaymentDoc[]> => {
 billsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const payload = parseBody(createBillSchema, req.body);
+    const clientRequestId = payload.clientRequestId ?? null;
+
+    if (clientRequestId) {
+      const existingByRequest = await dbQuery<BillRow>(
+        `
+          select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
+          from bills
+          where owner_user_id = $1
+            and vendor_id = $2
+            and client_request_id = $3
+            and deleted_at is null
+          limit 1
+        `,
+        [ownerUserId, payload.vendorId, clientRequestId],
+      );
+      if (existingByRequest.rows.length > 0) {
+        const [existingBill] = await buildBillDocs(existingByRequest.rows, true, ownerUserId);
+        sendOk(res, existingBill);
+        return;
+      }
+    }
 
     const vendor = await dbQuery<{ id: string }>(
       `
         select id
         from vendors
         where id = $1
+          and owner_user_id = $2
       `,
-      [payload.vendorId],
+      [payload.vendorId, ownerUserId],
     );
 
     if (vendor.rows.length === 0) {
@@ -236,14 +284,16 @@ billsRouter.post(
         `
           select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
           from bills
-          where vendor_id = $1
+          where owner_user_id = $1
+            and vendor_id = $2
+            and deleted_at is null
             and (
-              bill_number = $2
-              or ($3 <> 'pending' and image_hash = $3)
+              bill_number = $3
+              or ($4 <> 'pending' and image_hash = $4)
             )
           limit 1
         `,
-        [payload.vendorId, payload.billNumber, payload.imageHash],
+        [ownerUserId, payload.vendorId, payload.billNumber, payload.imageHash],
         client,
       );
 
@@ -252,44 +302,112 @@ billsRouter.post(
       }
 
       const billId = createObjectId();
-      const inserted = await dbQuery<BillRow>(
+      const inserted = await (async () => {
+        try {
+          return await dbQuery<BillRow>(
+            `
+              insert into bills (
+                id,
+                owner_user_id,
+                bill_number,
+                vendor_id,
+                date,
+                total_amount_paise,
+                image_url,
+                image_hash,
+                client_request_id
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              returning id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
+            `,
+            [
+              billId,
+              ownerUserId,
+              payload.billNumber,
+              payload.vendorId,
+              payload.date,
+              payload.totalAmountPaise,
+              payload.imageUrl,
+              payload.imageHash,
+              clientRequestId,
+            ],
+            client,
+          );
+        } catch (error) {
+          if (
+            clientRequestId &&
+            isUniqueConstraintError(error, 'ux_bills_owner_vendor_client_request')
+          ) {
+            const existing = await dbQuery<BillRow>(
+              `
+                select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
+                from bills
+                where owner_user_id = $1
+                  and vendor_id = $2
+                  and client_request_id = $3
+                  and deleted_at is null
+                limit 1
+              `,
+              [ownerUserId, payload.vendorId, clientRequestId],
+              client,
+            );
+
+            if (existing.rows.length > 0) {
+              return existing;
+            }
+          }
+
+          throw error;
+        }
+      })();
+
+      const insertedRow = inserted.rows[0];
+      const billCreatedFresh = insertedRow.id === billId;
+
+      const existingLineItems = await dbQuery<BillLineItemRow>(
         `
-          insert into bills (
-            id,
-            bill_number,
-            vendor_id,
-            date,
-            total_amount_paise,
-            image_url,
-            image_hash
-          )
-          values ($1, $2, $3, $4, $5, $6, $7)
-          returning id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
+          select id, bill_id, name, qty, rate_paise, amount_paise, created_at
+          from bill_line_items
+          where bill_id = $1
+          order by created_at asc
         `,
-        [
-          billId,
-          payload.billNumber,
-          payload.vendorId,
-          payload.date,
-          payload.totalAmountPaise,
-          payload.imageUrl,
-          payload.imageHash,
-        ],
+        [insertedRow.id],
         client,
       );
 
-      await insertLineItems(billId, payload.lineItems, client);
+      if (existingLineItems.rows.length === 0) {
+        await insertLineItems(insertedRow.id, payload.lineItems, client);
+      }
 
-      return toBillDoc(
-        inserted.rows[0],
-        payload.lineItems.map((lineItem) => ({
-          name: lineItem.name,
-          qty: lineItem.qty,
-          ratePaise: lineItem.ratePaise,
-          amountPaise: lineItem.amountPaise,
-        })),
-        inserted.rows[0].vendor_id,
-      );
+      if (billCreatedFresh) {
+        await recordAuditEvent({
+          ownerUserId,
+          actorUserId: ownerUserId,
+          entityType: 'bill',
+          entityId: insertedRow.id,
+          action: 'create',
+          payload: {
+            billNumber: insertedRow.bill_number,
+            vendorId: insertedRow.vendor_id,
+            totalAmountPaise: insertedRow.total_amount_paise,
+            imageHash: insertedRow.image_hash,
+            clientRequestId,
+          },
+          client,
+        });
+      }
+
+      const lineItemDocs: BillLineItemDoc[] =
+        existingLineItems.rows.length > 0
+          ? existingLineItems.rows.map(toBillLineItemDoc)
+          : payload.lineItems.map((lineItem) => ({
+              name: lineItem.name,
+              qty: lineItem.qty,
+              ratePaise: lineItem.ratePaise,
+              amountPaise: lineItem.amountPaise,
+            }));
+
+      return toBillDoc(insertedRow, lineItemDocs, insertedRow.vendor_id);
     });
 
     sendCreated(res, bill);
@@ -299,10 +417,11 @@ billsRouter.post(
 billsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const query = parseQuery(billsQuerySchema, req.query);
 
-    const filters: string[] = [];
-    const values: unknown[] = [];
+    const filters: string[] = ['owner_user_id = $1'];
+    const values: unknown[] = [ownerUserId];
 
     if (query.vendor) {
       values.push(query.vendor);
@@ -310,16 +429,17 @@ billsRouter.get(
     }
     if (query.dateFrom || query.dateTo) {
       if (query.dateFrom) {
-        values.push(new Date(query.dateFrom));
+        values.push(query.dateFrom);
         filters.push(`date >= $${values.length}`);
       }
       if (query.dateTo) {
-        values.push(new Date(query.dateTo));
+        values.push(query.dateTo);
         filters.push(`date <= $${values.length}`);
       }
     }
+    filters.push('deleted_at is null');
 
-    const whereClause = filters.length > 0 ? `where ${filters.join(' and ')}` : '';
+    const whereClause = `where ${filters.join(' and ')}`;
     const billRows = await dbQuery<BillRow>(
       `
         select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
@@ -330,7 +450,7 @@ billsRouter.get(
       values,
     );
 
-    const bills = await buildBillDocs(billRows.rows, true);
+    const bills = await buildBillDocs(billRows.rows, true, ownerUserId);
     const paidByBill = await getPaymentTotalsByBillIds(bills.map((bill) => bill._id));
     const summarized = attachBillSummaries(bills, paidByBill, 30);
     const filtered = query.status
@@ -359,6 +479,7 @@ billsRouter.get(
 billsRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const { id } = idParamSchema.parse(req.params);
 
     const billResult = await dbQuery<BillRow>(
@@ -366,8 +487,10 @@ billsRouter.get(
         select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
         from bills
         where id = $1
+          and owner_user_id = $2
+          and deleted_at is null
       `,
-      [id],
+      [id, ownerUserId],
     );
 
     if (billResult.rows.length === 0) {
@@ -375,7 +498,7 @@ billsRouter.get(
       return;
     }
 
-    const [bill] = await buildBillDocs([billResult.rows[0]], true);
+    const [bill] = await buildBillDocs([billResult.rows[0]], true, ownerUserId);
     const payments = await fetchPaymentsForBill(id);
     const paidPaise = payments.reduce((sum, payment) => sum + payment.amountPaise, 0);
     const [summary] = attachBillSummaries([bill], new Map([[String(bill._id), paidPaise]]), 30);
@@ -390,6 +513,7 @@ billsRouter.get(
 billsRouter.put(
   '/:id',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const { id } = idParamSchema.parse(req.params);
     const payload = parseBody(updateBillSchema, req.body);
 
@@ -399,8 +523,9 @@ billsRouter.put(
           select id
           from vendors
           where id = $1
+            and owner_user_id = $2
         `,
-        [payload.vendorId],
+        [payload.vendorId, ownerUserId],
       );
 
       if (vendor.rows.length === 0) {
@@ -415,8 +540,11 @@ billsRouter.put(
           select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
           from bills
           where id = $1
+            and owner_user_id = $2
+            and deleted_at is null
+          for update
         `,
-        [id],
+        [id, ownerUserId],
         client,
       );
 
@@ -424,21 +552,39 @@ billsRouter.put(
         notFound('Bill');
       }
 
-      if (payload.totalAmountPaise !== undefined) {
+      const existingRow = existing.rows[0];
+
+      let paidPaise = 0;
+      if (payload.totalAmountPaise !== undefined || payload.lineItems !== undefined) {
         const paid = await dbQuery<{ paid_paise: number }>(
           `
             select coalesce(sum(amount_paise), 0)::int as paid_paise
             from payments
             where bill_id = $1
+              and deleted_at is null
           `,
           [id],
           client,
         );
-        const paidPaise = paid.rows[0]?.paid_paise ?? 0;
+        paidPaise = paid.rows[0]?.paid_paise ?? 0;
+      }
+
+      if (payload.totalAmountPaise !== undefined) {
         if (payload.totalAmountPaise < paidPaise) {
           throw new HttpError(
             409,
             'Bill total cannot be lower than the amount already paid',
+          );
+        }
+      }
+
+      if (payload.lineItems !== undefined) {
+        const effectiveTotalPaise =
+          payload.totalAmountPaise ?? existingRow.total_amount_paise;
+        if (!isLineItemTotalWithinTolerance(effectiveTotalPaise, payload.lineItems)) {
+          throw new HttpError(
+            400,
+            'Line item total must match bill total (within Rs 1 tolerance)',
           );
         }
       }
@@ -476,15 +622,17 @@ billsRouter.put(
         updates.push(`image_hash = $${values.length}`);
       }
 
-      let updatedRow = existing.rows[0];
+      let updatedRow = existingRow;
 
       if (updates.length > 0 || payload.lineItems !== undefined) {
-        values.push(id);
+        values.push(id, ownerUserId);
         const updated = await dbQuery<BillRow>(
           `
             update bills
             set ${updates.length > 0 ? `${updates.join(', ')},` : ''} updated_at = now()
-            where id = $${values.length}
+            where id = $${values.length - 1}
+              and owner_user_id = $${values.length}
+              and deleted_at is null
             returning id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
           `,
           values,
@@ -516,6 +664,38 @@ billsRouter.put(
         client,
       );
 
+      if (updates.length > 0 || payload.lineItems !== undefined) {
+        await recordAuditEvent({
+          ownerUserId,
+          actorUserId: ownerUserId,
+          entityType: 'bill',
+          entityId: id,
+          action: 'update',
+          payload: {
+            changes: {
+              billNumber: payload.billNumber,
+              vendorId: payload.vendorId,
+              date: payload.date?.toISOString?.() ?? payload.date,
+              totalAmountPaise: payload.totalAmountPaise,
+              imageUrl: payload.imageUrl,
+              imageHash: payload.imageHash,
+              lineItemsUpdated: payload.lineItems !== undefined,
+            },
+            previous: {
+              billNumber: existingRow.bill_number,
+              vendorId: existingRow.vendor_id,
+              date: existingRow.date instanceof Date
+                ? existingRow.date.toISOString()
+                : existingRow.date,
+              totalAmountPaise: existingRow.total_amount_paise,
+              imageUrl: existingRow.image_url,
+              imageHash: existingRow.image_hash,
+            },
+          },
+          client,
+        });
+      }
+
       return toBillDoc(
         updatedRow,
         lineItems.rows.map(toBillLineItemDoc),
@@ -530,21 +710,65 @@ billsRouter.put(
 billsRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const { id } = idParamSchema.parse(req.params);
 
-    const bill = await dbQuery<{ id: string }>(
-      `
-        delete from bills
-        where id = $1
-        returning id
-      `,
-      [id],
-    );
+    await withTransaction(async (client) => {
+      const existing = await dbQuery<BillRow>(
+        `
+          select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
+          from bills
+          where id = $1
+            and owner_user_id = $2
+            and deleted_at is null
+          for update
+        `,
+        [id, ownerUserId],
+        client,
+      );
 
-    if (bill.rows.length === 0) {
-      notFound('Bill');
-      return;
-    }
+      if (existing.rows.length === 0) {
+        notFound('Bill');
+      }
+
+      await dbQuery(
+        `
+          update bills
+          set deleted_at = now(), updated_at = now()
+          where id = $1
+            and owner_user_id = $2
+            and deleted_at is null
+        `,
+        [id, ownerUserId],
+        client,
+      );
+
+      await dbQuery(
+        `
+          update payments
+          set deleted_at = now(), updated_at = now()
+          where bill_id = $1
+            and deleted_at is null
+        `,
+        [id],
+        client,
+      );
+
+      const deleted = existing.rows[0];
+      await recordAuditEvent({
+        ownerUserId,
+        actorUserId: ownerUserId,
+        entityType: 'bill',
+        entityId: id,
+        action: 'delete',
+        payload: {
+          billNumber: deleted.bill_number,
+          vendorId: deleted.vendor_id,
+          totalAmountPaise: deleted.total_amount_paise,
+        },
+        client,
+      });
+    });
 
     sendOk(res, { deleted: true });
   }),
@@ -553,11 +777,38 @@ billsRouter.delete(
 billsRouter.post(
   '/:id/payments',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const { id } = idParamSchema.parse(req.params);
     const payload = parseBody(createPaymentSchema, req.body);
+    const clientRequestId = payload.clientRequestId ?? null;
+
+    if (clientRequestId) {
+      const existingByRequest = await dbQuery<PaymentRow>(
+        `
+          select p.id, p.bill_id, p.amount_paise, p.date, p.collector_name, p.mode, p.notes, p.created_at, p.updated_at
+          from payments p
+          join bills b on b.id = p.bill_id
+          where p.bill_id = $1
+            and p.client_request_id = $2
+            and b.owner_user_id = $3
+            and p.deleted_at is null
+            and b.deleted_at is null
+          limit 1
+        `,
+        [id, clientRequestId, ownerUserId],
+      );
+      if (existingByRequest.rows.length > 0) {
+        sendOk(res, toPaymentDoc(existingByRequest.rows[0], []));
+        return;
+      }
+    }
 
     const payment = await withTransaction(async (client) => {
-      const billFinancials = await fetchBillFinancialsForUpdate(id, client);
+      const billFinancials = await fetchBillFinancialsForUpdate(
+        id,
+        ownerUserId,
+        client,
+      );
       const lockedBill = billFinancials ?? notFound('Bill');
 
       assertPaymentWithinBillLimit({
@@ -566,33 +817,86 @@ billsRouter.post(
         paymentAmountPaise: payload.amountPaise,
       });
 
-      const insertedPayment = await dbQuery<PaymentRow>(
-        `
-          insert into payments (
-            id,
-            bill_id,
-            amount_paise,
-            date,
-            collector_name,
-            mode,
-            notes
-          )
-          values ($1, $2, $3, $4, $5, $6, $7)
-          returning id, bill_id, amount_paise, date, collector_name, mode, notes, created_at, updated_at
-        `,
-        [
-          createObjectId(),
-          id,
-          payload.amountPaise,
-          payload.date,
-          payload.collectorName ?? null,
-          payload.mode,
-          payload.notes ?? null,
-        ],
-        client,
-      );
+      const paymentId = createObjectId();
+      const insertedPayment = await (async () => {
+        try {
+          return await dbQuery<PaymentRow>(
+            `
+              insert into payments (
+                id,
+                bill_id,
+                amount_paise,
+                date,
+                collector_name,
+                mode,
+                notes,
+                client_request_id
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8)
+              returning id, bill_id, amount_paise, date, collector_name, mode, notes, created_at, updated_at
+            `,
+            [
+              paymentId,
+              id,
+              payload.amountPaise,
+              payload.date,
+              payload.collectorName ?? null,
+              payload.mode,
+              payload.notes ?? null,
+              clientRequestId,
+            ],
+            client,
+          );
+        } catch (error) {
+          if (
+            clientRequestId &&
+            isUniqueConstraintError(error, 'ux_payments_bill_client_request')
+          ) {
+            const existing = await dbQuery<PaymentRow>(
+              `
+                select id, bill_id, amount_paise, date, collector_name, mode, notes, created_at, updated_at
+                from payments
+                where bill_id = $1
+                  and client_request_id = $2
+                  and deleted_at is null
+                limit 1
+              `,
+              [id, clientRequestId],
+              client,
+            );
 
-      return insertedPayment.rows[0];
+            if (existing.rows.length > 0) {
+              return existing;
+            }
+          }
+
+          throw error;
+        }
+      })();
+      const paymentRow = insertedPayment.rows[0];
+      const paymentCreatedFresh = paymentRow.id === paymentId;
+      if (paymentCreatedFresh) {
+        await recordAuditEvent({
+          ownerUserId,
+          actorUserId: ownerUserId,
+          entityType: 'payment',
+          entityId: paymentRow.id,
+          action: 'create',
+          payload: {
+            billId: paymentRow.bill_id,
+            amountPaise: paymentRow.amount_paise,
+            date: paymentRow.date instanceof Date
+              ? paymentRow.date.toISOString()
+              : paymentRow.date,
+            mode: paymentRow.mode,
+            collectorName: paymentRow.collector_name,
+            clientRequestId,
+          },
+          client,
+        });
+      }
+
+      return paymentRow;
     });
 
     sendCreated(res, toPaymentDoc(payment, []));

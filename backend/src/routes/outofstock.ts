@@ -5,6 +5,7 @@ import { createObjectId } from '../db/id';
 import { type OutOfStockItemRow, toOutOfStockItemDoc } from '../db/mappers';
 import { dbQuery } from '../db/postgres';
 import { asyncHandler } from '../utils/asyncHandler';
+import { getAuthUserId } from '../utils/authContext';
 import { notFound, parseBody, sendCreated, sendOk } from '../utils/http';
 import {
   createOutOfStockSchema,
@@ -20,13 +21,16 @@ const outOfStockRouter = Router();
 
 outOfStockRouter.get(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const items = await dbQuery<OutOfStockItemRow>(
       `
         select id, item_name, status, created_at, updated_at
         from out_of_stock_items
+        where owner_user_id = $1
         order by created_at desc
       `,
+      [ownerUserId],
     );
     sendOk(
       res,
@@ -38,14 +42,15 @@ outOfStockRouter.get(
 outOfStockRouter.post(
   '/',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const payload = parseBody(createOutOfStockSchema, req.body);
     const item = await dbQuery<OutOfStockItemRow>(
       `
-        insert into out_of_stock_items (id, item_name, status)
-        values ($1, $2, $3)
+        insert into out_of_stock_items (id, owner_user_id, item_name, status)
+        values ($1, $2, $3, $4)
         returning id, item_name, status, created_at, updated_at
       `,
-      [createObjectId(), payload.itemName, payload.status ?? 'pending'],
+      [createObjectId(), ownerUserId, payload.itemName, payload.status ?? 'pending'],
     );
     sendCreated(res, toOutOfStockItemDoc(item.rows[0]));
   }),
@@ -54,6 +59,7 @@ outOfStockRouter.post(
 outOfStockRouter.put(
   '/:id',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const { id } = idParamSchema.parse(req.params);
     const payload = parseBody(updateOutOfStockSchema, req.body);
 
@@ -62,9 +68,10 @@ outOfStockRouter.put(
         update out_of_stock_items
         set status = $1, updated_at = now()
         where id = $2
+          and owner_user_id = $3
         returning id, item_name, status, created_at, updated_at
       `,
-      [payload.status, id],
+      [payload.status, id, ownerUserId],
     );
 
     if (item.rows.length === 0) {
@@ -79,14 +86,16 @@ outOfStockRouter.put(
 outOfStockRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const { id } = idParamSchema.parse(req.params);
     const item = await dbQuery<{ id: string }>(
       `
         delete from out_of_stock_items
         where id = $1
+          and owner_user_id = $2
         returning id
       `,
-      [id],
+      [id, ownerUserId],
     );
 
     if (item.rows.length === 0) {
@@ -100,12 +109,14 @@ outOfStockRouter.delete(
 
 outOfStockRouter.delete(
   '/',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const result = await dbQuery(
       `
         delete from out_of_stock_items
-        where true
+        where owner_user_id = $1
       `,
+      [ownerUserId],
     );
     sendOk(res, { deletedCount: result.rowCount ?? 0 });
   }),

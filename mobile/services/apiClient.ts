@@ -89,6 +89,16 @@ export const apiRequest = async <T>(
         (!(error instanceof ApiError) || (error.status >= 500 && error.status < 600));
 
       if (!shouldRetry) {
+        if (!(error instanceof ApiError)) {
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            throw new Error('Request timed out. Please check your internet and try again.');
+          }
+
+          if (error instanceof TypeError) {
+            throw new Error('Network request failed. Please check your internet connection.');
+          }
+        }
+
         throw error;
       }
 

@@ -1,9 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import { createSecretKey } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
-import { jwtVerify } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { env } from '../config/env';
+import { claimLegacyOwnership } from '../services/ownerMigration';
 import { HttpError } from '../utils/http';
 
 const AUTH_UPSTREAM_TIMEOUT_MS = env.AUTH_UPSTREAM_TIMEOUT_MS;
@@ -12,6 +13,20 @@ const MAX_AUTH_CACHE_SIZE = 2_000;
 const jwtSecretKey = env.SUPABASE_JWT_SECRET
   ? createSecretKey(Buffer.from(env.SUPABASE_JWT_SECRET, 'utf8'))
   : null;
+const normalizedSupabaseUrl = env.SUPABASE_URL.replace(/\/$/, '');
+const supabaseIssuer = `${normalizedSupabaseUrl}/auth/v1`;
+const remoteJwks = !jwtSecretKey
+  ? createRemoteJWKSet(new URL(`${supabaseIssuer}/.well-known/jwks.json`))
+  : null;
+type AllowedRole = 'authenticated';
+type VerifiedTokenClaims = {
+  userId: string;
+  role: AllowedRole;
+};
+type AuthenticatedRequest = Request & {
+  authUserId?: string;
+  authRole?: AllowedRole;
+};
 
 const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
   const controller = new AbortController();
@@ -36,11 +51,28 @@ const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_K
     fetch: fetchWithTimeout,
   },
 });
-const authTokenCache = new Map<string, number>();
-const inFlightTokenChecks = new Map<string, Promise<boolean>>();
+const authTokenCache = new Map<string, { expiresAt: number; claims: VerifiedTokenClaims }>();
+const inFlightTokenChecks = new Map<string, Promise<VerifiedTokenClaims | null>>();
 
 const isAllowedRole = (role: unknown): boolean =>
-  role === null || role === 'authenticated' || role === 'service_role';
+  role === 'authenticated';
+
+const toVerifiedClaims = (claims: {
+  sub?: unknown;
+  role?: unknown;
+} | null | undefined): VerifiedTokenClaims | null => {
+  const subject = claims?.sub;
+  const role = claims?.role;
+  if (typeof subject !== 'string' || subject.length === 0 || !isAllowedRole(role)) {
+    return null;
+  }
+
+  const allowedRole = role as AllowedRole;
+  return {
+    userId: subject,
+    role: allowedRole,
+  };
+};
 
 const extractBearerToken = (authorizationHeader?: string): string | null => {
   if (!authorizationHeader) {
@@ -61,36 +93,64 @@ const pruneExpiredAuthCacheEntries = (): void => {
   }
 
   const now = Date.now();
-  authTokenCache.forEach((expiresAt, token) => {
-    if (expiresAt <= now) {
+  authTokenCache.forEach((entry, token) => {
+    if (entry.expiresAt <= now) {
       authTokenCache.delete(token);
     }
   });
 };
 
-const isTokenValidWithLocalSecret = async (token: string): Promise<boolean> => {
+const getTokenClaimsWithLocalSecret = async (
+  token: string,
+): Promise<VerifiedTokenClaims | null> => {
   if (!jwtSecretKey) {
-    return false;
+    return null;
   }
 
   try {
     const { payload } = await jwtVerify(token, jwtSecretKey, {
       algorithms: ['HS256'],
+      audience: 'authenticated',
     });
 
-    return isAllowedRole((payload as { role?: unknown }).role ?? null);
+    return toVerifiedClaims({
+      sub: payload.sub,
+      role: (payload as { role?: unknown }).role,
+    });
   } catch {
-    return false;
+    return null;
   }
 };
 
-const isTokenValid = async (token: string): Promise<boolean> => {
-  const now = Date.now();
-  const cachedUntil = authTokenCache.get(token);
-  if (cachedUntil && cachedUntil > now) {
-    return true;
+const getTokenClaimsWithRemoteJwks = async (
+  token: string,
+): Promise<VerifiedTokenClaims | null> => {
+  if (!remoteJwks) {
+    return null;
   }
-  if (cachedUntil) {
+
+  try {
+    const { payload } = await jwtVerify(token, remoteJwks, {
+      issuer: supabaseIssuer,
+      audience: 'authenticated',
+    });
+
+    return toVerifiedClaims({
+      sub: payload.sub,
+      role: (payload as { role?: unknown }).role,
+    });
+  } catch {
+    return null;
+  }
+};
+
+const getTokenClaims = async (token: string): Promise<VerifiedTokenClaims | null> => {
+  const now = Date.now();
+  const cached = authTokenCache.get(token);
+  if (cached && cached.expiresAt > now) {
+    return cached.claims;
+  }
+  if (cached) {
     authTokenCache.delete(token);
   }
 
@@ -100,22 +160,33 @@ const isTokenValid = async (token: string): Promise<boolean> => {
   }
 
   const checkPromise = (async () => {
-    let valid = false;
+    let claims: VerifiedTokenClaims | null = null;
 
     if (jwtSecretKey) {
-      valid = await isTokenValidWithLocalSecret(token);
+      claims = await getTokenClaimsWithLocalSecret(token);
     } else {
-      const { data, error } = await supabaseAdmin.auth.getClaims(token);
-      const roleClaim = typeof data?.claims?.role === 'string' ? data.claims.role : null;
-      valid = !(error || !data?.claims || !isAllowedRole(roleClaim));
+      claims = await getTokenClaimsWithRemoteJwks(token);
+
+      if (!claims) {
+        const { data, error } = await supabaseAdmin.auth.getClaims(token);
+        claims = error
+          ? null
+          : toVerifiedClaims({
+              sub: data?.claims?.sub,
+              role: data?.claims?.role,
+            });
+      }
     }
 
-    if (valid) {
-      authTokenCache.set(token, Date.now() + AUTH_CACHE_TTL_MS);
+    if (claims) {
+      authTokenCache.set(token, {
+        expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
+        claims,
+      });
       pruneExpiredAuthCacheEntries();
     }
 
-    return valid;
+    return claims;
   })().finally(() => {
     inFlightTokenChecks.delete(token);
   });
@@ -138,10 +209,18 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
 
   void (async () => {
     try {
-      const valid = await isTokenValid(token);
-      if (!valid) {
+      const claims = await getTokenClaims(token);
+      if (!claims) {
         next(new HttpError(401, 'Invalid or expired token'));
         return;
+      }
+
+      const request = req as AuthenticatedRequest;
+      request.authUserId = claims.userId;
+      request.authRole = claims.role;
+
+      if (claims.role === 'authenticated') {
+        await claimLegacyOwnership(claims.userId).catch(() => {});
       }
 
       next();

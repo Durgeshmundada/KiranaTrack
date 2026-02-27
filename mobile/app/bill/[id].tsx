@@ -22,12 +22,17 @@ import { GradientButton } from '@/components/ui/GradientButton';
 import { PinOverlay } from '@/components/ui/PinOverlay';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { t } from '@/i18n';
+import { ApiError } from '@/services/apiClient';
+import { generateClientRequestId } from '@/services/backendData';
 import { useAppStore } from '@/store/appStore';
 import { resolveVendor } from '@/store/selectors';
 import { radii, typography } from '@/theme/tokens';
 import type { PaymentMode } from '@/types/models';
 import { formatINRFromPaise, rupeeToPaise } from '@/utils/currency';
+import { toIsoFromDateInput } from '@/utils/dateInput';
 import { formatDisplayDate } from '@/utils/date';
+import { isSessionExpiredError, resolveUserErrorMessage } from '@/utils/errors';
+import { hasPin } from '@/utils/pin';
 import { computeBillStatus, remainingPaise, totalPaidPaise } from '@/utils/status';
 
 const modeOptions: PaymentMode[] = ['cash', 'upi', 'cheque', 'other'];
@@ -48,6 +53,7 @@ export default function BillDetailScreen() {
   const editPayment = useAppStore((state) => state.editPayment);
   const deletePayment = useAppStore((state) => state.deletePayment);
   const deleteBill = useAppStore((state) => state.deleteBill);
+  const syncAll = useAppStore((state) => state.syncAll);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -60,6 +66,11 @@ export default function BillDetailScreen() {
   const [collectorName, setCollectorName] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('cash');
   const [notes, setNotes] = useState('');
+  const [paymentRequestId, setPaymentRequestId] = useState<string | null>(null);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [deletingEntry, setDeletingEntry] = useState(false);
+  const [deletingBill, setDeletingBill] = useState(false);
 
   const bill = useMemo(() => bills.find((item) => item.id === id), [bills, id]);
 
@@ -91,14 +102,26 @@ export default function BillDetailScreen() {
 
   const openAddModal = () => {
     resetPaymentForm();
+    setPaymentRequestId(generateClientRequestId('payment'));
     setShowAddModal(true);
   };
 
   const onSavePayment = async () => {
+    if (submittingPayment) {
+      return;
+    }
+
     const amount = Number(paymentAmount);
     if (Number.isNaN(amount) || amount <= 0) {
       return;
     }
+
+    const normalizedPaymentDate = toIsoFromDateInput(paymentDate);
+    if (!normalizedPaymentDate) {
+      Alert.alert('Invalid date', 'Enter payment date in YYYY-MM-DD format.');
+      return;
+    }
+
     const paymentAmountPaise = rupeeToPaise(amount);
     if (paymentAmountPaise > remaining) {
       Alert.alert('Amount too high', 'Payment cannot be more than remaining bill amount.');
@@ -106,20 +129,62 @@ export default function BillDetailScreen() {
     }
 
     try {
+      setSubmittingPayment(true);
       await addPayment(bill.id, {
         amountPaise: paymentAmountPaise,
-        date: new Date(`${paymentDate}T00:00:00.000Z`).toISOString(),
+        date: normalizedPaymentDate,
         collectorName: collectorName.trim() || null,
         mode: paymentMode,
+        clientRequestId: paymentRequestId ?? generateClientRequestId('payment'),
         notes: notes.trim() || null,
       });
       setShowAddModal(false);
-    } catch {
-      Alert.alert('Save failed', 'Could not save payment. Please try again.');
+      setPaymentRequestId(null);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 409) {
+          await syncAll().catch(() => {});
+          Alert.alert('Payment conflict', error.message);
+          return;
+        }
+        if (isSessionExpiredError(error)) {
+          Alert.alert('Session expired', 'Please sign in again.');
+          return;
+        }
+        Alert.alert('Save failed', error.message);
+        return;
+      }
+      await syncAll().catch(() => {});
+      const refreshedBill = useAppStore
+        .getState()
+        .bills.find((item) => item.id === bill.id);
+      const maybeSaved = refreshedBill?.payments.some(
+        (payment) =>
+          payment.amountPaise === paymentAmountPaise &&
+          payment.date.slice(0, 10) === paymentDate,
+      );
+
+      if (maybeSaved) {
+        Alert.alert(
+          'Payment saved',
+          'Network response was delayed, but payment is already recorded.',
+        );
+      } else {
+        Alert.alert(
+          'Save failed',
+          resolveUserErrorMessage(error, 'Could not save payment. Please try again.'),
+        );
+      }
+    } finally {
+      setSubmittingPayment(false);
     }
   };
 
   const onSaveEdit = async () => {
+    if (submittingEdit) {
+      return;
+    }
+
     if (!editingPaymentId) {
       return;
     }
@@ -127,6 +192,13 @@ export default function BillDetailScreen() {
     if (Number.isNaN(amount) || amount <= 0) {
       return;
     }
+
+    const normalizedPaymentDate = toIsoFromDateInput(paymentDate);
+    if (!normalizedPaymentDate) {
+      Alert.alert('Invalid date', 'Enter payment date in YYYY-MM-DD format.');
+      return;
+    }
+
     const currentPayment = bill.payments.find((entry) => entry.id === editingPaymentId);
     if (!currentPayment) {
       return;
@@ -139,21 +211,54 @@ export default function BillDetailScreen() {
     }
 
     try {
+      setSubmittingEdit(true);
       await editPayment(bill.id, editingPaymentId, {
         amountPaise: paymentAmountPaise,
-        date: new Date(`${paymentDate}T00:00:00.000Z`).toISOString(),
+        date: normalizedPaymentDate,
         collectorName: collectorName.trim() || null,
         mode: paymentMode,
         notes: notes.trim() || null,
       });
       setShowEditModal(false);
       setEditingPaymentId(null);
-    } catch {
-      Alert.alert('Update failed', 'Could not update payment. Please try again.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.status === 409) {
+          await syncAll().catch(() => {});
+          Alert.alert('Payment conflict', error.message);
+          return;
+        }
+        if (isSessionExpiredError(error)) {
+          Alert.alert('Session expired', 'Please sign in again.');
+          return;
+        }
+        Alert.alert('Update failed', error.message);
+        return;
+      }
+
+      Alert.alert(
+        'Update failed',
+        resolveUserErrorMessage(error, 'Could not update payment. Please try again.'),
+      );
+    } finally {
+      setSubmittingEdit(false);
     }
   };
 
-  const requestSecureAction = (action: PendingAction) => {
+  const requestSecureAction = async (action: PendingAction) => {
+    const pinExists = await hasPin();
+    if (!pinExists) {
+      Alert.alert(
+        'PIN not set',
+        'Set a 4-digit PIN in Settings before using secure edit/delete actions.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => router.push('/settings') },
+        ],
+      );
+      return;
+    }
+
     setPendingAction(action);
     setShowPinOverlay(true);
   };
@@ -167,11 +272,17 @@ export default function BillDetailScreen() {
 
     if (pendingAction.type === 'deleteBill') {
       try {
+        setDeletingBill(true);
         await deleteBill(bill.id);
         router.replace('/(tabs)/bills');
         setPendingAction(null);
-      } catch {
-        Alert.alert('Delete failed', 'Could not delete bill. Please try again.');
+      } catch (error) {
+        Alert.alert(
+          'Delete failed',
+          resolveUserErrorMessage(error, 'Could not delete bill. Please try again.'),
+        );
+      } finally {
+        setDeletingBill(false);
       }
       return;
     }
@@ -184,10 +295,16 @@ export default function BillDetailScreen() {
 
     if (pendingAction.type === 'delete') {
       try {
+        setDeletingEntry(true);
         await deletePayment(bill.id, target.id);
         setPendingAction(null);
-      } catch {
-        Alert.alert('Delete failed', 'Could not delete payment. Please try again.');
+      } catch (error) {
+        Alert.alert(
+          'Delete failed',
+          resolveUserErrorMessage(error, 'Could not delete payment. Please try again.'),
+        );
+      } finally {
+        setDeletingEntry(false);
       }
       return;
     }
@@ -237,7 +354,11 @@ export default function BillDetailScreen() {
 
       <View style={styles.sectionHead}>
         <AppText variant="subtitle">{t('recentActivity')}</AppText>
-        <Pressable style={styles.deleteBillBtn} onPress={() => requestSecureAction({ type: 'deleteBill' })}>
+        <Pressable
+          style={styles.deleteBillBtn}
+          onPress={() => {
+            void requestSecureAction({ type: 'deleteBill' });
+          }}>
           <Feather name="trash-2" size={13} color="#fca5a5" />
           <AppText variant="caption" style={{ color: '#fca5a5' }}>
             Delete bill
@@ -259,8 +380,12 @@ export default function BillDetailScreen() {
             mode={payment.mode}
             notes={payment.notes}
             editedAt={payment.editLog.at(-1)?.editedAt ?? null}
-            onEdit={() => requestSecureAction({ type: 'edit', paymentId: payment.id })}
-            onDelete={() => requestSecureAction({ type: 'delete', paymentId: payment.id })}
+            onEdit={() => {
+              void requestSecureAction({ type: 'edit', paymentId: payment.id });
+            }}
+            onDelete={() => {
+              void requestSecureAction({ type: 'delete', paymentId: payment.id });
+            }}
           />
         ))
       )}
@@ -280,8 +405,12 @@ export default function BillDetailScreen() {
         setNotes={setNotes}
         mode={paymentMode}
         setMode={setPaymentMode}
-        onClose={() => setShowAddModal(false)}
+        onClose={() => {
+          setShowAddModal(false);
+          setPaymentRequestId(null);
+        }}
         onSave={onSavePayment}
+        saving={submittingPayment}
       />
 
       <PaymentModal
@@ -299,13 +428,14 @@ export default function BillDetailScreen() {
         setMode={setPaymentMode}
         onClose={() => setShowEditModal(false)}
         onSave={onSaveEdit}
+        saving={submittingEdit}
       />
 
       <PinOverlay
         visible={showPinOverlay}
         onClose={() => setShowPinOverlay(false)}
         onVerified={onPinVerified}
-        title={t('pinProtected')}
+        title={deletingBill || deletingEntry ? 'Processing...' : t('pinProtected')}
       />
     </ScreenContainer>
   );
@@ -326,6 +456,7 @@ interface PaymentModalProps {
   setNotes: (value: string) => void;
   onClose: () => void;
   onSave: () => void;
+  saving?: boolean;
 }
 
 const PaymentModal: React.FC<PaymentModalProps> = ({
@@ -343,6 +474,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
   setNotes,
   onClose,
   onSave,
+  saving = false,
 }) => (
   <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
     <View style={styles.modalBackdrop}>
@@ -419,7 +551,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
           <Pressable style={styles.cancelButton} onPress={onClose}>
             <AppText variant="label">{t('cancel')}</AppText>
           </Pressable>
-          <GradientButton label={t('save')} onPress={onSave} />
+          <GradientButton label={saving ? 'Saving...' : t('save')} onPress={onSave} disabled={saving} />
         </View>
       </GlassCard>
     </View>

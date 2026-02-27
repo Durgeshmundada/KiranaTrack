@@ -54,6 +54,7 @@ type NewBillPayload = {
   totalAmountPaise: number;
   imageUrl: string;
   imageHash: string;
+  clientRequestId?: string;
   lineItems: Bill['lineItems'];
 };
 
@@ -62,10 +63,12 @@ type NewPaymentPayload = {
   date: string;
   collectorName: string | null;
   mode?: PaymentMode;
+  clientRequestId?: string;
   notes?: string | null;
 };
 
 interface AppStoreState {
+  ownerUserId: string | null;
   initialized: boolean;
   loadingData: boolean;
   lastSyncAt: string | null;
@@ -76,7 +79,7 @@ interface AppStoreState {
   customers: UdhaarCustomer[];
   isOffline: boolean;
 
-  bootstrap: () => Promise<void>;
+  bootstrap: (ownerUserId: string) => Promise<void>;
   syncAll: () => Promise<void>;
   resetData: () => void;
   setOffline: (value: boolean) => void;
@@ -114,11 +117,19 @@ interface AppStoreState {
 }
 
 const normalize = (value: string): string => value.trim().toLowerCase();
+const OFFLINE_WRITE_ERROR = 'You are offline. Reconnect to internet and retry.';
+
+const assertOnlineForWrite = (isOffline: boolean): void => {
+  if (isOffline) {
+    throw new Error(OFFLINE_WRITE_ERROR);
+  }
+};
 
 export const useAppStore = create<AppStoreState>()(
   persist(
     (set, get) => ({
       initialized: false,
+      ownerUserId: null,
       loadingData: false,
       lastSyncAt: null,
       settings: DEFAULT_SETTINGS,
@@ -128,8 +139,22 @@ export const useAppStore = create<AppStoreState>()(
       customers: [],
       isOffline: false,
 
-      bootstrap: async () => {
+      bootstrap: async (ownerUserId) => {
         setAppLanguage(get().settings.language);
+
+        const currentOwner = get().ownerUserId;
+        if (currentOwner !== ownerUserId) {
+          set({
+            ownerUserId,
+            initialized: false,
+            lastSyncAt: null,
+            vendors: [],
+            bills: [],
+            outOfStockItems: [],
+            customers: [],
+          });
+        }
+
         try {
           await get().syncAll();
         } catch {
@@ -191,6 +216,7 @@ export const useAppStore = create<AppStoreState>()(
 
       resetData: () => {
         set({
+          ownerUserId: null,
           initialized: false,
           lastSyncAt: null,
           vendors: [],
@@ -235,6 +261,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addBill: async (payload) => {
+        assertOnlineForWrite(get().isOffline);
         const state = get();
         const vendorNameNormalized = normalize(payload.vendorName);
         let vendor = state.vendors.find(
@@ -261,6 +288,7 @@ export const useAppStore = create<AppStoreState>()(
           totalAmountPaise: payload.totalAmountPaise,
           imageUrl: payload.imageUrl,
           imageHash: payload.imageHash,
+          clientRequestId: payload.clientRequestId,
           lineItems: payload.lineItems.map((item) => ({
             name: item.name,
             qty: item.qty,
@@ -285,6 +313,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deleteBill: async (billId) => {
+        assertOnlineForWrite(get().isOffline);
         await deleteBillRemote(billId);
         set((state) => ({
           bills: state.bills.filter((bill) => bill.id !== billId),
@@ -294,11 +323,13 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addPayment: async (billId, payload) => {
+        assertOnlineForWrite(get().isOffline);
         const payment = await addPaymentRemote(billId, {
           amountPaise: payload.amountPaise,
           date: payload.date,
           collectorName: payload.collectorName,
           mode: payload.mode ?? get().settings.defaultPaymentMode,
+          clientRequestId: payload.clientRequestId,
           notes: payload.notes ?? null,
         });
         set((state) => ({
@@ -320,6 +351,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       editPayment: async (billId, paymentId, payload) => {
+        assertOnlineForWrite(get().isOffline);
         const updatedPayment = await editPaymentRemote(paymentId, {
           amountPaise: payload.amountPaise,
           date: payload.date,
@@ -345,6 +377,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deletePayment: async (billId, paymentId) => {
+        assertOnlineForWrite(get().isOffline);
         await deletePaymentRemote(paymentId);
         set((state) => ({
           bills: state.bills.map((bill) =>
@@ -362,6 +395,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addOutOfStockItem: async (name) => {
+        assertOnlineForWrite(get().isOffline);
         const trimmed = name.trim();
         if (!trimmed) {
           return;
@@ -379,6 +413,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       cycleOutOfStock: async (id) => {
+        assertOnlineForWrite(get().isOffline);
         const item = get().outOfStockItems.find((entry) => entry.id === id);
         if (!item) {
           return;
@@ -395,6 +430,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deleteOutOfStockItem: async (id) => {
+        assertOnlineForWrite(get().isOffline);
         await deleteOutOfStockItemRemote(id);
         set((state) => ({
           outOfStockItems: state.outOfStockItems.filter((item) => item.id !== id),
@@ -404,6 +440,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       clearOutOfStock: async () => {
+        assertOnlineForWrite(get().isOffline);
         await clearOutOfStockItems();
         set({
           outOfStockItems: [],
@@ -413,6 +450,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       markItemsRestockedByLineItems: async (lineItemNames) => {
+        assertOnlineForWrite(get().isOffline);
         const normalizedLineNames = lineItemNames.map((name) => normalize(name));
         const matches = get().outOfStockItems.filter((item) =>
           normalizedLineNames.some(
@@ -447,6 +485,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addCustomer: async (name, phone) => {
+        assertOnlineForWrite(get().isOffline);
         const trimmed = name.trim();
         if (!trimmed) {
           return;
@@ -473,6 +512,7 @@ export const useAppStore = create<AppStoreState>()(
         description = null,
         date,
       ) => {
+        assertOnlineForWrite(get().isOffline);
         if (amountPaise <= 0) {
           return;
         }
@@ -493,6 +533,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deleteUdhaarEntry: async (customerId, entryId) => {
+        assertOnlineForWrite(get().isOffline);
         const updatedCustomer = await deleteUdhaarEntryRemote(entryId);
         set((state) => ({
           customers: state.customers.map((customer) => {
@@ -519,6 +560,7 @@ export const useAppStore = create<AppStoreState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         initialized: state.initialized,
+        ownerUserId: state.ownerUserId,
         settings: state.settings,
         vendors: state.vendors,
         bills: state.bills,

@@ -6,7 +6,9 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { HttpError, parseBody, sendCreated, sendOk } from '../utils/http';
 import { authCredentialsSchema } from '../validators/schemas';
 
-const AUTH_ROUTE_TIMEOUT_MS = Math.max(8000, env.AUTH_UPSTREAM_TIMEOUT_MS);
+const AUTH_ROUTE_TIMEOUT_MS = Math.max(1500, env.AUTH_UPSTREAM_TIMEOUT_MS);
+const AUTH_UPSTREAM_MAX_ATTEMPTS = env.AUTH_UPSTREAM_RETRIES + 1;
+const retryableUpstreamStatusCodes = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 const fetchWithTimeout: typeof fetch = async (input, init = {}) => {
   const controller = new AbortController();
@@ -43,6 +45,54 @@ type AuthSessionPayload = {
   };
 };
 
+type SupabaseResultLike = {
+  data: unknown;
+  error: {
+    message?: string;
+    status?: number;
+  } | null;
+};
+
+const wait = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableUpstreamError = (
+  error: SupabaseResultLike['error'],
+): boolean => {
+  if (!error) {
+    return false;
+  }
+
+  if (
+    typeof error.status === 'number' &&
+    retryableUpstreamStatusCodes.has(error.status)
+  ) {
+    return true;
+  }
+
+  const message = (error.message ?? '').toLowerCase();
+  return (
+    message.includes('timeout') ||
+    message.includes('network') ||
+    message.includes('fetch') ||
+    message.includes('abort')
+  );
+};
+
+const isUnavailableUpstreamError = (
+  error: SupabaseResultLike['error'],
+): boolean => {
+  if (!error) {
+    return false;
+  }
+
+  if (typeof error.status === 'number' && error.status >= 500) {
+    return true;
+  }
+
+  return isRetryableUpstreamError(error);
+};
+
 const toAuthSessionPayload = (authData: {
   session: {
     access_token: string;
@@ -66,6 +116,46 @@ const toAuthSessionPayload = (authData: {
   };
 };
 
+const runSupabaseAuthResultCall = async <T extends SupabaseResultLike>(
+  fn: () => Promise<T>,
+): Promise<T> => {
+  let lastResult: T | null = null;
+
+  for (let attempt = 1; attempt <= AUTH_UPSTREAM_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await fn();
+      lastResult = result;
+
+      if (!isRetryableUpstreamError(result.error) || attempt >= AUTH_UPSTREAM_MAX_ATTEMPTS) {
+        return result;
+      }
+    } catch {
+      if (attempt >= AUTH_UPSTREAM_MAX_ATTEMPTS) {
+        throw new HttpError(503, 'Authentication service unavailable. Please try again.');
+      }
+    }
+
+    await wait(env.AUTH_UPSTREAM_RETRY_DELAY_MS * attempt);
+  }
+
+  throw new HttpError(503, 'Authentication service unavailable. Please try again.');
+};
+
+const normalizeAuthFailureStatus = (
+  error: SupabaseResultLike['error'],
+  fallbackStatus: number,
+): number => {
+  if (!error) {
+    return fallbackStatus;
+  }
+
+  if (isUnavailableUpstreamError(error)) {
+    return 503;
+  }
+
+  return fallbackStatus;
+};
+
 const authRouter = Router();
 
 authRouter.post(
@@ -74,13 +164,18 @@ authRouter.post(
     const payload = parseBody(authCredentialsSchema, req.body);
     const email = payload.email.trim().toLowerCase();
 
-    const signIn = await supabaseAuthClient.auth.signInWithPassword({
-      email,
-      password: payload.password,
-    });
+    const signIn = await runSupabaseAuthResultCall(() =>
+      supabaseAuthClient.auth.signInWithPassword({
+        email,
+        password: payload.password,
+      }),
+    );
 
     if (signIn.error || !signIn.data.session?.access_token || !signIn.data.session?.refresh_token) {
-      throw new HttpError(401, signIn.error?.message ?? 'Invalid email or password');
+      throw new HttpError(
+        normalizeAuthFailureStatus(signIn.error, 401),
+        signIn.error?.message ?? 'Invalid email or password',
+      );
     }
 
     sendOk(
@@ -104,11 +199,13 @@ authRouter.post(
     const payload = parseBody(authCredentialsSchema, req.body);
     const email = payload.email.trim().toLowerCase();
 
-    const created = await supabaseAuthClient.auth.admin.createUser({
-      email,
-      password: payload.password,
-      email_confirm: true,
-    });
+    const created = await runSupabaseAuthResultCall(() =>
+      supabaseAuthClient.auth.admin.createUser({
+        email,
+        password: payload.password,
+        email_confirm: true,
+      }),
+    );
 
     if (created.error) {
       const errorMessage = created.error.message ?? 'Unable to create account';
@@ -116,17 +213,25 @@ authRouter.post(
         errorMessage.toLowerCase().includes('already') ||
         errorMessage.toLowerCase().includes('exists');
       if (!conflictDetected) {
-        throw new HttpError(400, errorMessage);
+        throw new HttpError(
+          normalizeAuthFailureStatus(created.error, 400),
+          errorMessage,
+        );
       }
     }
 
-    const signIn = await supabaseAuthClient.auth.signInWithPassword({
-      email,
-      password: payload.password,
-    });
+    const signIn = await runSupabaseAuthResultCall(() =>
+      supabaseAuthClient.auth.signInWithPassword({
+        email,
+        password: payload.password,
+      }),
+    );
 
     if (signIn.error || !signIn.data.session?.access_token || !signIn.data.session?.refresh_token) {
-      throw new HttpError(400, signIn.error?.message ?? 'Unable to sign in after account creation');
+      throw new HttpError(
+        normalizeAuthFailureStatus(signIn.error, 400),
+        signIn.error?.message ?? 'Unable to sign in after account creation',
+      );
     }
 
     sendCreated(

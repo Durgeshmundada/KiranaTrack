@@ -31,12 +31,16 @@ backend/  # Express API
    - Set `SUPABASE_DB_URL` to your Supabase direct Postgres URL (fallback)
    - Set `SUPABASE_DB_POOL_URL` to Supabase pooler transaction URL (recommended for lower latency/reliability)
    - Set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
-   - Optional performance optimization: set `SUPABASE_JWT_SECRET` for local JWT verification in backend auth middleware
+   - Set `SUPABASE_JWT_SECRET` (required in production for local JWT verification and auth reliability)
    - Set `GROQ_API_KEY` for parser endpoints
-   - Run SQL from `backend/supabase/schema.sql` in Supabase SQL Editor
+   - Optional parser resilience: set `GROQ_IMAGE_FALLBACK_MODELS` (comma-separated) for secondary vision model retries
+   - Optional auth resilience: tune `AUTH_UPSTREAM_TIMEOUT_MS`, `AUTH_UPSTREAM_RETRIES`, and `AUTH_UPSTREAM_RETRY_DELAY_MS`
+   - Optional startup resilience: tune `DB_CONNECT_RETRY_ATTEMPTS` and `DB_CONNECT_RETRY_DELAY_MS`
+   - Run SQL from `backend/supabase/schema.sql` in Supabase SQL Editor (includes owner scoping + idempotency columns/indexes)
 2. Create mobile env file:
    - Copy `mobile/.env.example` to `mobile/.env`
    - Set `EXPO_PUBLIC_API_BASE_URL` (for real device use your PC IP, not localhost)
+   - Keep `EXPO_PUBLIC_ENABLE_BACKEND_FALLBACK=false` unless you explicitly trust and control the fallback backend URL
    - `EXPO_PUBLIC_GROQ_API_KEY` is dev-only fallback and should remain empty for production
    - Do not put Supabase service key or DB URL in mobile env; secrets must stay backend-only
 3. Install dependencies (already installed in this workspace, run only if needed):
