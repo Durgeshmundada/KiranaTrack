@@ -15,9 +15,7 @@ const jwtSecretKey = env.SUPABASE_JWT_SECRET
   : null;
 const normalizedSupabaseUrl = env.SUPABASE_URL.replace(/\/$/, '');
 const supabaseIssuer = `${normalizedSupabaseUrl}/auth/v1`;
-const remoteJwks = !jwtSecretKey
-  ? createRemoteJWKSet(new URL(`${supabaseIssuer}/.well-known/jwks.json`))
-  : null;
+const remoteJwks = createRemoteJWKSet(new URL(`${supabaseIssuer}/.well-known/jwks.json`));
 type AllowedRole = 'authenticated';
 type VerifiedTokenClaims = {
   userId: string;
@@ -125,10 +123,6 @@ const getTokenClaimsWithLocalSecret = async (
 const getTokenClaimsWithRemoteJwks = async (
   token: string,
 ): Promise<VerifiedTokenClaims | null> => {
-  if (!remoteJwks) {
-    return null;
-  }
-
   try {
     const { payload } = await jwtVerify(token, remoteJwks, {
       issuer: supabaseIssuer,
@@ -160,22 +154,20 @@ const getTokenClaims = async (token: string): Promise<VerifiedTokenClaims | null
   }
 
   const checkPromise = (async () => {
-    let claims: VerifiedTokenClaims | null = null;
+    let claims = await getTokenClaimsWithLocalSecret(token);
 
-    if (jwtSecretKey) {
-      claims = await getTokenClaimsWithLocalSecret(token);
-    } else {
+    if (!claims) {
       claims = await getTokenClaimsWithRemoteJwks(token);
+    }
 
-      if (!claims) {
-        const { data, error } = await supabaseAdmin.auth.getClaims(token);
-        claims = error
-          ? null
-          : toVerifiedClaims({
-              sub: data?.claims?.sub,
-              role: data?.claims?.role,
-            });
-      }
+    if (!claims) {
+      const { data, error } = await supabaseAdmin.auth.getClaims(token);
+      claims = error
+        ? null
+        : toVerifiedClaims({
+            sub: data?.claims?.sub,
+            role: data?.claims?.role,
+          });
     }
 
     if (claims) {
