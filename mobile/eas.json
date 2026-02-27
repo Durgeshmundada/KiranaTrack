@@ -10,6 +10,7 @@
     },
     "preview": {
       "distribution": "internal",
+      "environment": "production",
       "credentialsSource": "local",
       "android": {
         "buildType": "apk"
