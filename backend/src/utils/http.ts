@@ -1,5 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ZodError, type ZodSchema } from 'zod';
+import { logError, logWarn } from '../observability/logger';
+import { recordDbErrorMetric } from '../observability/metrics';
 
 export const parseBody = <T>(schema: ZodSchema<T>, body: unknown): T => {
   return schema.parse(body);
@@ -85,8 +87,11 @@ export const errorMiddleware = (
 
   if (error instanceof HttpError) {
     if (error.statusCode >= 500) {
-      // eslint-disable-next-line no-console
-      console.error(`[http-error] ${requestContext} status=${error.statusCode} message=${error.message}`);
+      logError('http.error', {
+        requestContext,
+        statusCode: error.statusCode,
+        message: error.message,
+      });
     }
     res.status(error.statusCode).json({
       success: false,
@@ -97,8 +102,10 @@ export const errorMiddleware = (
   }
 
   if (error instanceof ZodError) {
-    // eslint-disable-next-line no-console
-    console.warn(`[validation-error] ${requestContext} issues=${error.issues.length}`);
+    logWarn('http.validation_error', {
+      requestContext,
+      issues: error.issues.length,
+    });
     res.status(400).json({
       success: false,
       message: 'Validation failed',
@@ -114,11 +121,14 @@ export const errorMiddleware = (
   if (isPgError(error)) {
     const mapped = mapPgError(error);
     if (mapped) {
+      recordDbErrorMetric(error.code ?? 'unknown');
       if (mapped.statusCode >= 500) {
-        // eslint-disable-next-line no-console
-        console.error(
-          `[db-error] ${requestContext} status=${mapped.statusCode} code=${error.code ?? 'unknown'} constraint=${error.constraint ?? 'unknown'}`,
-        );
+        logError('http.db_error', {
+          requestContext,
+          statusCode: mapped.statusCode,
+          code: error.code ?? 'unknown',
+          constraint: error.constraint ?? 'unknown',
+        });
       }
       res.status(mapped.statusCode).json({
         success: false,
@@ -129,13 +139,13 @@ export const errorMiddleware = (
     }
   }
 
-  // eslint-disable-next-line no-console
-  console.error(
-    `[unhandled-error] ${requestContext}`,
-    error instanceof Error
-      ? { name: error.name, message: error.message, stack: error.stack }
-      : { error },
-  );
+  logError('http.unhandled_error', {
+    requestContext,
+    error:
+      error instanceof Error
+        ? { name: error.name, message: error.message, stack: error.stack }
+        : { error },
+  });
 
   res.status(500).json({
     success: false,

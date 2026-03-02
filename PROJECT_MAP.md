@@ -241,8 +241,11 @@ Backend (`backend/.env`):
 - `SUPABASE_URL` (required)
 - `SUPABASE_SERVICE_ROLE_KEY` (required)
 - `SUPABASE_JWT_SECRET` (optional, enables fast local JWT verification)
+- `AUTH_SIGNUP_ENABLED` (optional, defaults to `false`)
 - `GROQ_API_KEY` (optional but required for parser route success)
 - `PORT`, `CORS_ORIGIN`, rate-limit and parser tuning vars
+- `TRUST_PROXY` (optional, defaults to `1`)
+- `HEALTH_DETAILS_TOKEN` (optional, protects `/health/detailed` in production)
 
 Mobile (`mobile/.env`):
 - `EXPO_PUBLIC_API_BASE_URL`

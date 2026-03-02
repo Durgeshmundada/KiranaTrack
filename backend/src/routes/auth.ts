@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { createClient } from '@supabase/supabase-js';
 
 import { env } from '../config/env';
+import { recordAuthFailureMetric } from '../observability/metrics';
 import { asyncHandler } from '../utils/asyncHandler';
 import { HttpError, parseBody, sendCreated, sendOk } from '../utils/http';
 import { authCredentialsSchema } from '../validators/schemas';
 
-const AUTH_ROUTE_TIMEOUT_MS = Math.max(1500, env.AUTH_UPSTREAM_TIMEOUT_MS);
+const AUTH_ROUTE_TIMEOUT_MS = Math.max(3000, env.AUTH_UPSTREAM_TIMEOUT_MS);
 const AUTH_UPSTREAM_MAX_ATTEMPTS = env.AUTH_UPSTREAM_RETRIES + 1;
 const retryableUpstreamStatusCodes = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
@@ -172,6 +173,7 @@ authRouter.post(
     );
 
     if (signIn.error || !signIn.data.session?.access_token || !signIn.data.session?.refresh_token) {
+      recordAuthFailureMetric(signIn.error ? 'login_invalid_credentials_or_upstream' : 'login_missing_session');
       throw new HttpError(
         normalizeAuthFailureStatus(signIn.error, 401),
         signIn.error?.message ?? 'Invalid email or password',
@@ -196,6 +198,10 @@ authRouter.post(
 authRouter.post(
   '/signup',
   asyncHandler(async (req, res) => {
+    if (!env.AUTH_SIGNUP_ENABLED) {
+      throw new HttpError(403, 'Sign-up is disabled');
+    }
+
     const payload = parseBody(authCredentialsSchema, req.body);
     const email = payload.email.trim().toLowerCase();
 
@@ -208,6 +214,7 @@ authRouter.post(
     );
 
     if (created.error) {
+      recordAuthFailureMetric('signup_create_user_error');
       const errorMessage = created.error.message ?? 'Unable to create account';
       const conflictDetected =
         errorMessage.toLowerCase().includes('already') ||
@@ -228,6 +235,7 @@ authRouter.post(
     );
 
     if (signIn.error || !signIn.data.session?.access_token || !signIn.data.session?.refresh_token) {
+      recordAuthFailureMetric('signup_signin_failed');
       throw new HttpError(
         normalizeAuthFailureStatus(signIn.error, 400),
         signIn.error?.message ?? 'Unable to sign in after account creation',

@@ -19,6 +19,7 @@ interface RawVendor {
   gstNumber: string | null;
   defaultCollectorName: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 interface RawPayment {
@@ -68,6 +69,7 @@ interface RawOutOfStockItem {
   itemName: string;
   status: OutOfStockItem['status'];
   createdAt: string;
+  updatedAt: string;
 }
 
 interface RawUdhaarEntry {
@@ -84,6 +86,41 @@ interface RawUdhaarCustomer {
   phone: string | null;
   entries: RawUdhaarEntry[];
   createdAt: string;
+  updatedAt: string;
+}
+
+interface PaginatedApiData<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+interface RawAnalyticsSummary {
+  outstandingPaise: number;
+  receivablePaise: number;
+  netPositionPaise: number;
+}
+
+interface RawVendorOutstanding {
+  vendorId: string;
+  vendorName: string;
+  outstandingPaise: number;
+}
+
+interface RawMonthlySpendPoint {
+  month: string;
+  totalPaidPaise: number;
+}
+
+interface RawPriceAnomaly {
+  vendorName: string;
+  itemName: string;
+  latestRatePaise: number;
+  averageRatePaise: number;
+  differencePaise: number;
+  billNumber: string;
 }
 
 export const generateClientRequestId = (prefix: string): string =>
@@ -96,6 +133,7 @@ const toVendor = (row: RawVendor): Vendor => ({
   gstNumber: row.gstNumber,
   defaultCollectorName: row.defaultCollectorName,
   createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
 });
 
 const toPayment = (row: RawPayment): Payment => ({
@@ -144,6 +182,7 @@ const toOutOfStockItem = (row: RawOutOfStockItem): OutOfStockItem => ({
   itemName: row.itemName,
   status: row.status,
   createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
 });
 
 const toUdhaarCustomer = (row: RawUdhaarCustomer): UdhaarCustomer => ({
@@ -151,6 +190,7 @@ const toUdhaarCustomer = (row: RawUdhaarCustomer): UdhaarCustomer => ({
   customerName: row.customerName,
   phone: row.phone,
   createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
   entries: row.entries.map((entry) => ({
     id: entry._id,
     type: entry.type,
@@ -160,28 +200,91 @@ const toUdhaarCustomer = (row: RawUdhaarCustomer): UdhaarCustomer => ({
   })),
 });
 
-export const fetchVendors = async (): Promise<Vendor[]> => {
-  const response = await authApiRequest<ApiEnvelope<RawVendor[]>>('/api/vendors', {
+const withUpdatedAfter = (path: string, updatedAfter?: string): string => {
+  if (!updatedAfter) {
+    return path;
+  }
+
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}updatedAfter=${encodeURIComponent(updatedAfter)}`;
+};
+
+const toArrayPayload = <T>(
+  data: T[] | PaginatedApiData<T>,
+): T[] => {
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return data.items ?? [];
+};
+
+export const fetchVendors = async (options?: {
+  updatedAfter?: string;
+}): Promise<Vendor[]> => {
+  const response = await authApiRequest<ApiEnvelope<RawVendor[]>>(
+    withUpdatedAfter('/api/vendors', options?.updatedAfter),
+    {
     method: 'GET',
-  });
+    },
+  );
   return response.data.map(toVendor);
 };
 
-export const fetchBillsWithPayments = async (): Promise<Bill[]> => {
-  const listResponse = await authApiRequest<ApiEnvelope<RawBill[]>>(
-    '/api/bills?includePayments=true',
-    {
-      method: 'GET',
-      timeoutMs: 20000,
-    },
-  );
+export const fetchBillsWithPayments = async (options?: {
+  updatedAfter?: string;
+}): Promise<Bill[]> => {
+  if (!options?.updatedAfter) {
+    const listResponse = await authApiRequest<ApiEnvelope<RawBill[]>>(
+      '/api/bills?includePayments=true',
+      {
+        method: 'GET',
+        timeoutMs: 20000,
+      },
+    );
 
-  return listResponse.data.map(toBill).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return listResponse.data.map(toBill).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  const pageSize = 100;
+  let page = 1;
+  const rows: RawBill[] = [];
+
+  while (true) {
+    const response = await authApiRequest<
+      ApiEnvelope<RawBill[] | PaginatedApiData<RawBill>>
+    >(
+      `/api/bills?includePayments=true&page=${page}&pageSize=${pageSize}&updatedAfter=${encodeURIComponent(options.updatedAfter)}`,
+      {
+        method: 'GET',
+        timeoutMs: 20000,
+      },
+    );
+
+    const payloadRows = toArrayPayload(response.data);
+    rows.push(...payloadRows);
+
+    if (!Array.isArray(response.data)) {
+      if (page >= response.data.totalPages) {
+        break;
+      }
+      page += 1;
+      continue;
+    }
+
+    if (payloadRows.length < pageSize) {
+      break;
+    }
+    page += 1;
+  }
+
+  return rows.map(toBill).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 };
 
-export const fetchOutOfStockItems = async (): Promise<OutOfStockItem[]> => {
+export const fetchOutOfStockItems = async (options?: {
+  updatedAfter?: string;
+}): Promise<OutOfStockItem[]> => {
   const response = await authApiRequest<ApiEnvelope<RawOutOfStockItem[]>>(
-    '/api/outofstock',
+    withUpdatedAfter('/api/outofstock', options?.updatedAfter),
     {
       method: 'GET',
     },
@@ -189,15 +292,57 @@ export const fetchOutOfStockItems = async (): Promise<OutOfStockItem[]> => {
   return response.data.map(toOutOfStockItem);
 };
 
-export const fetchUdhaarCustomers = async (): Promise<UdhaarCustomer[]> => {
+export const fetchUdhaarCustomers = async (options?: {
+  updatedAfter?: string;
+}): Promise<UdhaarCustomer[]> => {
   const response = await authApiRequest<ApiEnvelope<RawUdhaarCustomer[]>>(
-    '/api/udhaar',
+    withUpdatedAfter('/api/udhaar', options?.updatedAfter),
     {
       method: 'GET',
     },
   );
 
   return response.data.map(toUdhaarCustomer);
+};
+
+export const fetchAnalyticsSummary = async (): Promise<RawAnalyticsSummary> => {
+  const response = await authApiRequest<ApiEnvelope<RawAnalyticsSummary>>(
+    '/api/analytics/summary',
+    {
+      method: 'GET',
+    },
+  );
+  return response.data;
+};
+
+export const fetchVendorOutstandingAnalytics = async (): Promise<RawVendorOutstanding[]> => {
+  const response = await authApiRequest<ApiEnvelope<RawVendorOutstanding[]>>(
+    '/api/analytics/vendor-wise',
+    {
+      method: 'GET',
+    },
+  );
+  return response.data;
+};
+
+export const fetchMonthlySpendAnalytics = async (): Promise<RawMonthlySpendPoint[]> => {
+  const response = await authApiRequest<ApiEnvelope<RawMonthlySpendPoint[]>>(
+    '/api/analytics/monthly-spend',
+    {
+      method: 'GET',
+    },
+  );
+  return response.data;
+};
+
+export const fetchPriceAnomaliesAnalytics = async (): Promise<RawPriceAnomaly[]> => {
+  const response = await authApiRequest<ApiEnvelope<RawPriceAnomaly[]>>(
+    '/api/analytics/price-anomalies',
+    {
+      method: 'GET',
+    },
+  );
+  return response.data;
 };
 
 export const createVendor = async (payload: {

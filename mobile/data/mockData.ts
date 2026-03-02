@@ -14,6 +14,7 @@ export const demoVendors: Vendor[] = [
     gstNumber: '27ABCDE1234F1Z5',
     defaultCollectorName: 'Raju Patil',
     createdAt: daysAgoIso(120),
+    updatedAt: daysAgoIso(30),
   },
   {
     id: 'vendor-2',
@@ -22,6 +23,7 @@ export const demoVendors: Vendor[] = [
     gstNumber: null,
     defaultCollectorName: 'Sameer',
     createdAt: daysAgoIso(86),
+    updatedAt: daysAgoIso(20),
   },
   {
     id: 'vendor-3',
@@ -30,6 +32,7 @@ export const demoVendors: Vendor[] = [
     gstNumber: null,
     defaultCollectorName: null,
     createdAt: daysAgoIso(65),
+    updatedAt: daysAgoIso(10),
   },
 ];
 
@@ -129,18 +132,21 @@ export const demoOutOfStockItems: OutOfStockItem[] = [
     itemName: 'Tata Salt 1kg',
     status: 'pending',
     createdAt: daysAgoIso(3),
+    updatedAt: daysAgoIso(3),
   },
   {
     id: 'stock-2',
     itemName: 'Maggi Noodles',
     status: 'ordered',
     createdAt: daysAgoIso(2),
+    updatedAt: daysAgoIso(1),
   },
   {
     id: 'stock-3',
     itemName: 'Aashirvaad Atta 5kg',
     status: 'pending',
     createdAt: daysAgoIso(1),
+    updatedAt: daysAgoIso(1),
   },
 ];
 
@@ -150,6 +156,7 @@ export const demoCustomers: UdhaarCustomer[] = [
     customerName: 'Ramesh Jadhav',
     phone: '+91 99210 45501',
     createdAt: daysAgoIso(40),
+    updatedAt: daysAgoIso(12),
     entries: [
       {
         id: 'entry-1',
@@ -172,6 +179,7 @@ export const demoCustomers: UdhaarCustomer[] = [
     customerName: 'Neha Kale',
     phone: null,
     createdAt: daysAgoIso(10),
+    updatedAt: daysAgoIso(2),
     entries: [
       {
         id: 'entry-3',

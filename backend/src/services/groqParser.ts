@@ -157,10 +157,21 @@ const buildModelFallbackList = (primaryModel: string, rawFallbackModels: string)
   return [...new Set(models)];
 };
 
-const getAbortSignal = (timeoutMs: number): AbortSignal => {
+const fetchWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> => {
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), timeoutMs);
-  return controller.signal;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 const wait = (ms: number): Promise<void> =>
@@ -173,20 +184,23 @@ const requestGroqWithRetry = async (params: {
 }): Promise<ParsedBillDraft | null> => {
   for (let attempt = 1; attempt <= parserMaxAttempts; attempt += 1) {
     try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${env.GROQ_API_KEY}`,
+      const response = await fetchWithTimeout(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${env.GROQ_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: params.model,
+            temperature: 0,
+            messages: params.messages,
+            max_tokens: params.maxTokens,
+          }),
         },
-        body: JSON.stringify({
-          model: params.model,
-          temperature: 0,
-          messages: params.messages,
-          max_tokens: params.maxTokens,
-        }),
-        signal: getAbortSignal(parserTimeoutMs),
-      });
+        parserTimeoutMs,
+      );
 
       const parsed = await parseGroqResponse(response);
       if (parsed) {

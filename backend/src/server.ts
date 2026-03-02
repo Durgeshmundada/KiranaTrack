@@ -3,13 +3,15 @@ import cors from 'cors';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import morgan from 'morgan';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
 import { env } from './config/env';
 import { closeDatabase, connectDatabase, getDatabaseState } from './db/postgres';
 import { authMiddleware } from './middleware/auth';
+import { startAlertLoop, stopAlertLoop } from './observability/alerts';
+import { logError, logInfo, logWarn } from './observability/logger';
+import { recordHttpRequestMetric, renderPrometheusMetrics } from './observability/metrics';
 import { analyticsRouter } from './routes/analytics';
 import { authRouter } from './routes/auth';
 import { billsRouter } from './routes/bills';
@@ -21,7 +23,14 @@ import { vendorsRouter } from './routes/vendors';
 import { errorMiddleware } from './utils/http';
 
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', env.TRUST_PROXY);
+
+const corsOriginConfig =
+  env.CORS_ORIGIN === '*'
+    ? true
+    : env.CORS_ORIGIN.split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
 
 app.use((req, res, next) => {
   const requestId = randomUUID();
@@ -30,16 +39,59 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  const startedAtNs = process.hrtime.bigint();
+  const requestId = req.header('x-request-id') ?? 'n/a';
+
+  res.on('finish', () => {
+    const elapsedMs = Number(process.hrtime.bigint() - startedAtNs) / 1_000_000;
+    const routePattern = req.route?.path;
+    const route =
+      typeof routePattern === 'string'
+        ? `${req.baseUrl || ''}${routePattern || ''}` || req.path
+        : req.path;
+
+    recordHttpRequestMetric({
+      method: req.method,
+      route,
+      statusCode: res.statusCode,
+      durationMs: elapsedMs,
+    });
+
+    const logContext = {
+      requestId,
+      method: req.method,
+      route,
+      statusCode: res.statusCode,
+      durationMs: Math.round(elapsedMs),
+      userAgent: req.get('user-agent') ?? null,
+      remoteAddress: req.ip,
+    };
+
+    if (res.statusCode >= 500) {
+      logError('http.request.completed', logContext);
+      return;
+    }
+    if (res.statusCode >= 400) {
+      logWarn('http.request.completed', logContext);
+      return;
+    }
+
+    logInfo('http.request.completed', logContext);
+  });
+
+  next();
+});
+
 app.use(
   cors({
-    origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(','),
+    origin: corsOriginConfig,
     credentials: env.CORS_ORIGIN !== '*',
   }),
 );
 app.use(helmet());
 app.use(compression());
 app.use(express.json({ limit: '2mb' }));
-app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(authMiddleware);
 
 app.use(
@@ -55,14 +107,51 @@ app.get('/health', (_req, res) => {
   res.status(200).json({
     success: true,
     service: 'kiranatrack-backend',
+    release: env.RELEASE_VERSION,
     timestamp: new Date().toISOString(),
   });
 });
 
+app.get('/metrics', (req, res) => {
+  if (!env.METRICS_ENABLED) {
+    res.status(404).json({
+      success: false,
+      message: 'Not found',
+    });
+    return;
+  }
+
+  if (env.NODE_ENV === 'production') {
+    const providedToken = req.header('x-metrics-token');
+    if (env.METRICS_TOKEN && providedToken !== env.METRICS_TOKEN) {
+      res.status(404).json({
+        success: false,
+        message: 'Not found',
+      });
+      return;
+    }
+  }
+
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.status(200).send(renderPrometheusMetrics());
+});
+
 app.get('/health/detailed', (_req, res) => {
+  if (env.NODE_ENV === 'production') {
+    const providedToken = _req.header('x-health-token');
+    if (!env.HEALTH_DETAILS_TOKEN || providedToken !== env.HEALTH_DETAILS_TOKEN) {
+      res.status(404).json({
+        success: false,
+        message: 'Not found',
+      });
+      return;
+    }
+  }
+
   res.status(200).json({
     success: true,
     service: 'kiranatrack-backend',
+    release: env.RELEASE_VERSION,
     timestamp: new Date().toISOString(),
     dbState: getDatabaseState(),
   });
@@ -108,8 +197,7 @@ const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
   }
 
   shuttingDown = true;
-  // eslint-disable-next-line no-console
-  console.log(`Received ${signal}. Shutting down gracefully...`);
+  logInfo('server.shutdown.started', { signal });
 
   try {
     await Promise.race([
@@ -124,6 +212,7 @@ const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
       new Promise<void>((resolve) => setTimeout(resolve, 8000)),
     ]);
   } finally {
+    stopAlertLoop();
     await closeDatabase().catch(() => {});
     process.exit(0);
   }
@@ -136,11 +225,29 @@ process.on('SIGINT', () => {
   void shutdown('SIGINT');
 });
 
+process.on('unhandledRejection', (reason) => {
+  logError('process.unhandled_rejection', {
+    reason: reason instanceof Error ? reason.message : String(reason),
+  });
+});
+
+process.on('uncaughtException', (error) => {
+  logError('process.uncaught_exception', {
+    error: error.message,
+    stack: error.stack ?? null,
+  });
+  process.exit(1);
+});
+
 const start = async (): Promise<void> => {
   const dbSource = env.SUPABASE_DB_POOL_URL ? 'pooler' : 'direct';
   const authMode = env.SUPABASE_JWT_SECRET ? 'local-jwt' : 'supabase-claims';
-  // eslint-disable-next-line no-console
-  console.log(`Startup config -> db=${dbSource}, auth=${authMode}, env=${env.NODE_ENV}`);
+  logInfo('server.startup.config', {
+    dbSource,
+    authMode,
+    nodeEnv: env.NODE_ENV,
+    release: env.RELEASE_VERSION,
+  });
 
   let connected = false;
   let lastError: unknown = null;
@@ -151,10 +258,11 @@ const start = async (): Promise<void> => {
       break;
     } catch (error) {
       lastError = error;
-      // eslint-disable-next-line no-console
-      console.error(
-        `Database connect attempt ${attempt}/${env.DB_CONNECT_RETRY_ATTEMPTS} failed`,
-      );
+      logError('server.db_connect_attempt.failed', {
+        attempt,
+        maxAttempts: env.DB_CONNECT_RETRY_ATTEMPTS,
+        error: error instanceof Error ? error.message : String(error),
+      });
       if (attempt < env.DB_CONNECT_RETRY_ATTEMPTS) {
         await wait(env.DB_CONNECT_RETRY_DELAY_MS * attempt);
       }
@@ -168,13 +276,18 @@ const start = async (): Promise<void> => {
   }
 
   httpServer = app.listen(env.PORT, () => {
-    // eslint-disable-next-line no-console
-    console.log(`KiranaTrack backend running on http://localhost:${env.PORT}`);
+    logInfo('server.started', {
+      port: env.PORT,
+      localUrl: `http://localhost:${env.PORT}`,
+    });
   });
+
+  startAlertLoop();
 };
 
 start().catch((error) => {
-  // eslint-disable-next-line no-console
-  console.error('Failed to start server:', error);
+  logError('server.start_failed', {
+    error: error instanceof Error ? error.message : String(error),
+  });
   process.exit(1);
 });

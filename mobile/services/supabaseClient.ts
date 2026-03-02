@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getSessionStorageItem,
+  removeSessionStorageItem,
+  setSessionStorageItem,
+} from '@/services/sessionStorage';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
@@ -15,21 +19,21 @@ type AuthStorage = {
 const authStorage: AuthStorage = {
   getItem: async (key) => {
     try {
-      return await AsyncStorage.getItem(key);
+      return await getSessionStorageItem(key);
     } catch {
       return null;
     }
   },
   setItem: async (key, value) => {
     try {
-      await AsyncStorage.setItem(key, value);
+      await setSessionStorageItem(key, value);
     } catch {
       // Ignore storage failures and keep session in-memory at runtime.
     }
   },
   removeItem: async (key) => {
     try {
-      await AsyncStorage.removeItem(key);
+      await removeSessionStorageItem(key);
     } catch {
       // Ignore storage cleanup failures.
     }

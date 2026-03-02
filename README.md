@@ -10,7 +10,7 @@ Production-structured full-stack project for supplier bill tracking, installment
 - Animated dashboard with financial summary, overdue list, and recent activity
 - Branded startup logo animation with credit line: "Made by Durgesh Mundada"
 - Bills list with search + status filters
-- Scan flow (camera/gallery, OCR simulation, Groq parsing fallback, confirm + save)
+- Scan flow (camera/gallery, OCR via OCR.space fallback, backend parse queue, confirm + save)
 - Scan flow now supports backend parser endpoint for secure Groq key usage (`/api/parse/bill-image`)
 - Bill detail with payment timeline and PIN-protected edit/delete
 - Out-of-stock notepad with status cycle and bulk clear
@@ -18,6 +18,8 @@ Production-structured full-stack project for supplier bill tracking, installment
 - Analytics cards/charts (vendor outstanding, monthly spend, status mix, anomaly alerts)
 - Settings: language switch (EN/HI/MR), overdue threshold, payment mode, PIN setup, backup export
 - Backend REST APIs for bills, payments, vendors, outofstock, udhaar, analytics
+- Structured backend observability (JSON logs, request tracing, Prometheus-style `/metrics`, alert webhook thresholds)
+- Synthetic uptime checks + staged rollout workflow + rollback runbook
 
 ## Project Structure
 ```
@@ -32,6 +34,11 @@ backend/  # Express API
    - Set `SUPABASE_DB_POOL_URL` to Supabase pooler transaction URL (recommended for lower latency/reliability)
    - Set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
    - Set `SUPABASE_JWT_SECRET` (required in production for local JWT verification and auth reliability)
+   - Set `AUTH_SIGNUP_ENABLED=false` unless you explicitly want public self-signup
+   - Set `TRUST_PROXY` based on deployment network (Render default: `1`)
+   - Optional: set `HEALTH_DETAILS_TOKEN` to restrict `/health/detailed` in production
+   - Optional: set `METRICS_TOKEN` to protect `/metrics` in production
+   - Optional: set `ALERT_WEBHOOK_URL` and alert thresholds for p95/auth/db budgets
    - Set `GROQ_API_KEY` for parser endpoints
    - Optional parser resilience: set `GROQ_IMAGE_FALLBACK_MODELS` (comma-separated) for secondary vision model retries
    - Optional auth resilience: tune `AUTH_UPSTREAM_TIMEOUT_MS`, `AUTH_UPSTREAM_RETRIES`, and `AUTH_UPSTREAM_RETRY_DELAY_MS`
@@ -42,6 +49,8 @@ backend/  # Express API
    - Set `EXPO_PUBLIC_API_BASE_URL` (for real device use your PC IP, not localhost)
    - Keep `EXPO_PUBLIC_ENABLE_BACKEND_FALLBACK=false` unless you explicitly trust and control the fallback backend URL
    - `EXPO_PUBLIC_GROQ_API_KEY` is dev-only fallback and should remain empty for production
+   - Optional: set `EXPO_PUBLIC_OCR_SPACE_API_KEY` for OCR fallback
+   - Optional: set `EXPO_PUBLIC_CRASH_WEBHOOK_URL` for release crash telemetry
    - Do not put Supabase service key or DB URL in mobile env; secrets must stay backend-only
 3. Install dependencies (already installed in this workspace, run only if needed):
    - `npm --prefix mobile install`
@@ -61,6 +70,8 @@ Production note:
 - Backend typecheck: `npm --prefix backend run typecheck`
 - Workspace typecheck: `npm run typecheck`
 - Backend latency benchmark (requires running backend + valid Supabase envs): `npm --prefix backend run bench:latency`
+- Backend load test: `npm --prefix backend run load:test`
+- Backend synthetic check (login + CRUD): `npm --prefix backend run synthetic:check`
 
 ## Deployment
 - Backend production deploy config: `render.yaml`
@@ -70,7 +81,7 @@ Production note:
 
 ## API Endpoints
 - `POST /api/bills`
-- `GET /api/bills`
+- `GET /api/bills` (supports `status`, `vendor`, `dateFrom`, `dateTo`, `updatedAfter`, optional pagination `page` + `pageSize`)
 - `GET /api/bills/:id`
 - `PUT /api/bills/:id`
 - `DELETE /api/bills/:id`
@@ -95,12 +106,15 @@ Production note:
 - `GET /api/analytics/price-anomalies`
 - `POST /api/parse/bill-image`
 - `POST /api/parse/bill-text`
+- `GET /api/parse/jobs/:jobId`
+- `GET /health`
+- `GET /health/detailed`
+- `GET /metrics`
 
 ## Production Hardening Checklist
-- Add real OCR integration (`react-native-ml-kit`) replacing mock OCR in `mobile/services/ocr.ts`
+- Keep OCR fallback key in secure env only (`EXPO_PUBLIC_OCR_SPACE_API_KEY`)
 - Keep `SUPABASE_DB_POOL_URL` + `SUPABASE_JWT_SECRET` configured in production backend
 - Disable direct mobile Groq fallback in production (`EXPO_PUBLIC_ENABLE_DIRECT_GROQ_FALLBACK=false`)
 - Rotate leaked keys immediately if any service role/Groq key was ever exposed
 - Add DB-level indexes tuned from real usage
-- Add integration tests for critical payment flows
-- Add release monitoring + crash reporting
+- Keep synthetic uptime workflow and staged deploy workflow green

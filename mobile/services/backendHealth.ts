@@ -1,4 +1,4 @@
-import { apiRequest } from '@/services/apiClient';
+import { ApiError, apiRequest } from '@/services/apiClient';
 import { resolveBackendBaseUrl } from '@/services/backendClient';
 
 interface HealthPayload {
@@ -40,7 +40,27 @@ export const checkBackendHealth = async (): Promise<BackendHealthResult> => {
       dbState: payload.dbState ?? null,
       baseUrl,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+      try {
+        const payload = await apiRequest<HealthPayload>(`${baseUrl}/health`, {
+          method: 'GET',
+          timeoutMs: 8000,
+          retries: 1,
+          retryDelayMs: 500,
+        });
+
+        return {
+          ok: payload.success,
+          message: 'Backend reachable (detailed health is restricted)',
+          dbState: null,
+          baseUrl,
+        };
+      } catch {
+        // Fall through to unreachable response.
+      }
+    }
+
     return {
       ok: false,
       message: 'Backend unreachable from this device/network',

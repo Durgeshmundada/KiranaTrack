@@ -22,6 +22,20 @@ const parseRetries = (() => {
   }
   return Math.min(Math.max(raw, 0), 2);
 })();
+const parserJobPollIntervalMs = (() => {
+  const raw = Number(process.env.EXPO_PUBLIC_PARSER_JOB_POLL_INTERVAL_MS ?? '');
+  if (!Number.isFinite(raw)) {
+    return 700;
+  }
+  return Math.min(Math.max(raw, 250), 5000);
+})();
+const parserJobPollAttempts = (() => {
+  const raw = Number(process.env.EXPO_PUBLIC_PARSER_JOB_POLL_ATTEMPTS ?? '');
+  if (!Number.isInteger(raw)) {
+    return 10;
+  }
+  return Math.min(Math.max(raw, 1), 60);
+})();
 
 const getMimeType = (imageUri: string): string => {
   const uri = imageUri.toLowerCase();
@@ -47,6 +61,67 @@ const hasMeaningfulBillData = (
         draft.lineItems.length > 0
       ),
   );
+
+type ParserAsyncResponse = {
+  jobId: string;
+  status: 'processing' | 'queued';
+};
+
+type ParserJobSnapshot = {
+  status: 'queued' | 'processing' | 'succeeded' | 'failed';
+  result: ParsedBillDraft | null;
+  error?: string | null;
+};
+
+const isParserAsyncResponse = (
+  value: unknown,
+): value is ParserAsyncResponse => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.jobId === 'string' &&
+    (row.status === 'processing' || row.status === 'queued')
+  );
+};
+
+const wait = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const pollParserJobResult = async (jobId: string): Promise<ParsedBillDraft | null> => {
+  for (let attempt = 1; attempt <= parserJobPollAttempts; attempt += 1) {
+    try {
+      const response = await authApiRequest<{ success?: boolean; data?: ParserJobSnapshot }>(
+        `/api/parse/jobs/${jobId}`,
+        {
+          method: 'GET',
+          timeoutMs: parseTimeoutMs,
+          retries: 0,
+        },
+      );
+      const status = response.data?.status;
+      if (status === 'succeeded') {
+        return hasMeaningfulBillData(response.data?.result)
+          ? response.data.result
+          : null;
+      }
+      if (status === 'failed') {
+        return null;
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        throw error;
+      }
+      return null;
+    }
+
+    await wait(parserJobPollIntervalMs * attempt);
+  }
+
+  return null;
+};
 
 const getImageDimensions = async (
   imageUri: string,
@@ -94,7 +169,10 @@ export const parseBillImageViaBackend = async (imageUri: string): Promise<Parsed
   const imageDataUrl = `data:${mimeType};base64,${base64}`;
 
   try {
-    const payload = await authApiRequest<{ success?: boolean; data?: ParsedBillDraft }>(
+    const payload = await authApiRequest<{
+      success?: boolean;
+      data?: ParsedBillDraft | ParserAsyncResponse;
+    }>(
       '/api/parse/bill-image',
       {
         method: 'POST',
@@ -104,6 +182,11 @@ export const parseBillImageViaBackend = async (imageUri: string): Promise<Parsed
         retryDelayMs: 500,
       },
     );
+
+    if (isParserAsyncResponse(payload.data)) {
+      return pollParserJobResult(payload.data.jobId);
+    }
+
     return hasMeaningfulBillData(payload.data) ? payload.data : null;
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
@@ -126,7 +209,10 @@ export const parseBillTextViaBackend = async (
   }
 
   try {
-    const payload = await authApiRequest<{ success?: boolean; data?: ParsedBillDraft }>(
+    const payload = await authApiRequest<{
+      success?: boolean;
+      data?: ParsedBillDraft | ParserAsyncResponse;
+    }>(
       '/api/parse/bill-text',
       {
         method: 'POST',
@@ -138,6 +224,11 @@ export const parseBillTextViaBackend = async (
         retryDelayMs: 500,
       },
     );
+
+    if (isParserAsyncResponse(payload.data)) {
+      return pollParserJobResult(payload.data.jobId);
+    }
+
     return hasMeaningfulBillData(payload.data) ? payload.data : null;
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {

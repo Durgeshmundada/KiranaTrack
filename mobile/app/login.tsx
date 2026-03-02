@@ -23,6 +23,29 @@ type AuthMode = 'signin' | 'signup';
 
 const isEmail = (value: string): boolean => /\S+@\S+\.\S+/.test(value);
 
+const isWrongCredentialsError = (error: unknown): boolean => {
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  if (status === 400 || status === 401) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalized = error.message.trim().toLowerCase();
+  return (
+    normalized.includes('invalid login credentials') ||
+    normalized.includes('invalid email or password') ||
+    normalized.includes('wrong email or password') ||
+    normalized.includes('incorrect password') ||
+    normalized.includes('invalid credentials')
+  );
+};
+
 export default function LoginScreen() {
   const session = useAuthStore((state) => state.session);
   const loading = useAuthStore((state) => state.loading);
@@ -73,6 +96,11 @@ export default function LoginScreen() {
       );
       setMode('signin');
     } catch (error) {
+      if (mode === 'signin' && isWrongCredentialsError(error)) {
+        Alert.alert('Sign in failed', 'Wrong email or password.');
+        return;
+      }
+
       const message =
         error instanceof Error ? error.message : 'Authentication failed. Please try again.';
       Alert.alert('Auth failed', message);

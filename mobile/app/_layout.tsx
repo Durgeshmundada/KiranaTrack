@@ -11,6 +11,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import 'react-native-reanimated';
 
 import { PinOverlay } from '@/components/ui/PinOverlay';
+import { initializeCrashReporting } from '@/services/crashReporting';
 import { useAppStore } from '@/store/appStore';
 import { useAuthStore } from '@/store/authStore';
 import { hasPin } from '@/utils/pin';
@@ -54,6 +55,10 @@ export default function RootLayout() {
     Manrope_600SemiBold,
     Manrope_700Bold,
   });
+
+  useEffect(() => {
+    initializeCrashReporting();
+  }, []);
 
   useEffect(() => {
     if (error) {

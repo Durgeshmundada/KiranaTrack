@@ -1,9 +1,13 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session, User } from '@supabase/supabase-js';
 import { create } from 'zustand';
 
 import { type BackendAuthSession, signInWithBackend, signUpWithBackend } from '@/services/backendAuth';
 import { setManualAccessToken } from '@/services/backendClient';
+import {
+  getSessionStorageItem,
+  removeSessionStorageItem,
+  setSessionStorageItem,
+} from '@/services/sessionStorage';
 import { isSupabaseConfigured, supabase } from '@/services/supabaseClient';
 
 interface AuthState {
@@ -51,18 +55,18 @@ const persistBackendSession = async (
   payload: BackendAuthSession | null,
 ): Promise<void> => {
   if (!payload) {
-    await AsyncStorage.removeItem(BACKEND_SESSION_STORAGE_KEY);
+    await removeSessionStorageItem(BACKEND_SESSION_STORAGE_KEY);
     return;
   }
 
-  await AsyncStorage.setItem(
+  await setSessionStorageItem(
     BACKEND_SESSION_STORAGE_KEY,
     JSON.stringify(payload),
   );
 };
 
 const readPersistedBackendSession = async (): Promise<BackendAuthSession | null> => {
-  const raw = await AsyncStorage.getItem(BACKEND_SESSION_STORAGE_KEY);
+  const raw = await getSessionStorageItem(BACKEND_SESSION_STORAGE_KEY);
   if (!raw) {
     return null;
   }
@@ -120,6 +124,38 @@ const withTimeout = async <T>(
   }
 };
 
+const shouldFallbackToBackendAuth = (error: unknown): boolean => {
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+
+  if (typeof status === 'number') {
+    if (status >= 500 || status === 408 || status === 429) {
+      return true;
+    }
+    if (status >= 400 && status < 500) {
+      return false;
+    }
+  }
+
+  if (error instanceof Error) {
+    const normalized = error.message.toLowerCase();
+    if (
+      normalized.includes('timed out') ||
+      normalized.includes('timeout') ||
+      normalized.includes('network') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('fetch failed') ||
+      normalized.includes('internet')
+    ) {
+      return true;
+    }
+  }
+
+  return true;
+};
+
 const applyPersistedBackendSession = async (
   backendSession: BackendAuthSession,
   set: (partial: Partial<AuthState>) => void,
@@ -145,6 +181,22 @@ const applyPersistedBackendSession = async (
       })
       .catch(() => {});
   }
+};
+
+const applySupabaseSession = async (
+  session: Session | null,
+  set: (partial: Partial<AuthState>) => void,
+): Promise<void> => {
+  setManualAccessToken(
+    session?.access_token ?? null,
+    session?.refresh_token ?? null,
+  );
+  await clearPersistedBackendSession();
+  set({
+    session,
+    user: session?.user ?? null,
+    ready: true,
+  });
 };
 
 export const useAuthStore = create<AuthState>()((set) => ({
@@ -193,24 +245,12 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
     const activeSupabaseSession = error ? null : (data?.session ?? null);
     if (activeSupabaseSession) {
-      set({
-        session: activeSupabaseSession,
-        user: activeSupabaseSession.user ?? null,
-        ready: true,
-      });
-      setManualAccessToken(
-        activeSupabaseSession.access_token,
-        activeSupabaseSession.refresh_token,
-      );
-      await clearPersistedBackendSession();
+      await applySupabaseSession(activeSupabaseSession, set);
     } else {
       const persistedBackendSession = await readPersistedBackendSession();
       if (persistedBackendSession) {
         await applyPersistedBackendSession(persistedBackendSession, set);
       } else {
-        if (error) {
-          initialized = false;
-        }
         set({
           session: null,
           user: null,
@@ -244,54 +284,51 @@ export const useAuthStore = create<AuthState>()((set) => ({
     set({ loading: true });
 
     try {
-      try {
-        const backendSession = await signInWithBackend(normalizedEmail, password);
-        const session = toPseudoSession(backendSession);
-        setManualAccessToken(
-          backendSession.accessToken,
-          backendSession.refreshToken,
-        );
-        await persistBackendSession(backendSession).catch(() => {});
-        set({
-          session,
-          user: session.user,
-          ready: true,
-        });
+      if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await withTimeout(
+            supabase.auth.signInWithPassword({
+              email: normalizedEmail,
+              password,
+            }),
+            SUPABASE_AUTH_TIMEOUT_MS,
+            'Sign-in timed out. Please check internet and retry.',
+          );
 
-        if (isSupabaseConfigured) {
-          await supabase.auth
-            .setSession({
-              access_token: backendSession.accessToken,
-              refresh_token: backendSession.refreshToken,
-            })
-            .catch(() => {});
+          if (error || !data.session) {
+            throw error ?? new Error('Authentication failed');
+          }
+
+          await applySupabaseSession(data.session, set);
+          return;
+        } catch (supabaseError) {
+          if (!shouldFallbackToBackendAuth(supabaseError)) {
+            throw supabaseError;
+          }
+          // Fall back to backend-auth bridge only when direct Supabase sign-in fails.
         }
-        return;
-      } catch (backendError) {
-        if (!isSupabaseConfigured) {
-          throw backendError;
-        }
+      }
 
-        const { data, error } = await withTimeout(
-          supabase.auth.signInWithPassword({
-            email: normalizedEmail,
-            password,
-          }),
-          SUPABASE_AUTH_TIMEOUT_MS,
-          'Sign-in timed out. Please check internet and retry.',
-        );
+      const backendSession = await signInWithBackend(normalizedEmail, password);
+      const session = toPseudoSession(backendSession);
+      setManualAccessToken(
+        backendSession.accessToken,
+        backendSession.refreshToken,
+      );
+      await persistBackendSession(backendSession).catch(() => {});
+      set({
+        session,
+        user: session.user,
+        ready: true,
+      });
 
-        if (error || !data.session) {
-          throw error ?? new Error('Authentication failed');
-        }
-
-        setManualAccessToken(null, null);
-        await clearPersistedBackendSession();
-        set({
-          session: data.session,
-          user: data.user ?? null,
-          ready: true,
-        });
+      if (isSupabaseConfigured) {
+        await supabase.auth
+          .setSession({
+            access_token: backendSession.accessToken,
+            refresh_token: backendSession.refreshToken,
+          })
+          .catch(() => {});
       }
     } finally {
       set({ loading: false });
@@ -303,54 +340,51 @@ export const useAuthStore = create<AuthState>()((set) => ({
     set({ loading: true });
 
     try {
-      try {
-        const backendSession = await signUpWithBackend(normalizedEmail, password);
-        const session = toPseudoSession(backendSession);
-        setManualAccessToken(
-          backendSession.accessToken,
-          backendSession.refreshToken,
-        );
-        await persistBackendSession(backendSession).catch(() => {});
-        set({
-          session,
-          user: session.user,
-          ready: true,
-        });
+      if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await withTimeout(
+            supabase.auth.signUp({
+              email: normalizedEmail,
+              password,
+            }),
+            SUPABASE_AUTH_TIMEOUT_MS,
+            'Sign-up timed out. Please check internet and retry.',
+          );
 
-        if (isSupabaseConfigured) {
-          await supabase.auth
-            .setSession({
-              access_token: backendSession.accessToken,
-              refresh_token: backendSession.refreshToken,
-            })
-            .catch(() => {});
+          if (error) {
+            throw error;
+          }
+
+          await applySupabaseSession(data.session, set);
+          return;
+        } catch (supabaseError) {
+          if (!shouldFallbackToBackendAuth(supabaseError)) {
+            throw supabaseError;
+          }
+          // Fall back to backend-auth bridge only when direct Supabase sign-up fails.
         }
-        return;
-      } catch (backendError) {
-        if (!isSupabaseConfigured) {
-          throw backendError;
-        }
+      }
 
-        const { data, error } = await withTimeout(
-          supabase.auth.signUp({
-            email: normalizedEmail,
-            password,
-          }),
-          SUPABASE_AUTH_TIMEOUT_MS,
-          'Sign-up timed out. Please check internet and retry.',
-        );
+      const backendSession = await signUpWithBackend(normalizedEmail, password);
+      const session = toPseudoSession(backendSession);
+      setManualAccessToken(
+        backendSession.accessToken,
+        backendSession.refreshToken,
+      );
+      await persistBackendSession(backendSession).catch(() => {});
+      set({
+        session,
+        user: session.user,
+        ready: true,
+      });
 
-        if (error) {
-          throw error;
-        }
-
-        setManualAccessToken(null, null);
-        await clearPersistedBackendSession();
-        set({
-          session: data.session,
-          user: data.user ?? null,
-          ready: true,
-        });
+      if (isSupabaseConfigured) {
+        await supabase.auth
+          .setSession({
+            access_token: backendSession.accessToken,
+            refresh_token: backendSession.refreshToken,
+          })
+          .catch(() => {});
       }
     } finally {
       set({ loading: false });

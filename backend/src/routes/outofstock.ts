@@ -6,10 +6,11 @@ import { type OutOfStockItemRow, toOutOfStockItemDoc } from '../db/mappers';
 import { dbQuery } from '../db/postgres';
 import { asyncHandler } from '../utils/asyncHandler';
 import { getAuthUserId } from '../utils/authContext';
-import { notFound, parseBody, sendCreated, sendOk } from '../utils/http';
+import { notFound, parseBody, parseQuery, sendCreated, sendOk } from '../utils/http';
 import {
   createOutOfStockSchema,
   objectIdSchema,
+  updatedAfterQuerySchema,
   updateOutOfStockSchema,
 } from '../validators/schemas';
 
@@ -23,14 +24,22 @@ outOfStockRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const ownerUserId = getAuthUserId(req);
+    const query = parseQuery(updatedAfterQuerySchema, req.query);
+    const values: unknown[] = [ownerUserId];
+    const filters = ['owner_user_id = $1'];
+    if (query.updatedAfter) {
+      values.push(query.updatedAfter);
+      filters.push(`updated_at >= $${values.length}`);
+    }
+
     const items = await dbQuery<OutOfStockItemRow>(
       `
         select id, item_name, status, created_at, updated_at
         from out_of_stock_items
-        where owner_user_id = $1
+        where ${filters.join(' and ')}
         order by created_at desc
       `,
-      [ownerUserId],
+      values,
     );
     sendOk(
       res,

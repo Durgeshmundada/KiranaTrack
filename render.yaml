@@ -11,8 +11,36 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: RELEASE_VERSION
+        sync: false
       - key: CORS_ORIGIN
         sync: false
+      - key: TRUST_PROXY
+        value: "1"
+      - key: HEALTH_DETAILS_TOKEN
+        sync: false
+      - key: LOG_LEVEL
+        value: "info"
+      - key: METRICS_ENABLED
+        value: "true"
+      - key: METRICS_WINDOW_MS
+        value: "300000"
+      - key: METRICS_TOKEN
+        sync: false
+      - key: ALERT_WEBHOOK_URL
+        sync: false
+      - key: ALERT_COOLDOWN_MS
+        value: "300000"
+      - key: ALERT_EVALUATION_INTERVAL_MS
+        value: "60000"
+      - key: ALERT_P95_LATENCY_MS
+        value: "1500"
+      - key: ALERT_AUTH_FAILURES_THRESHOLD
+        value: "20"
+      - key: ALERT_DB_ERRORS_THRESHOLD
+        value: "10"
+      - key: ALERT_MIN_REQUESTS
+        value: "30"
       - key: SUPABASE_DB_URL
         sync: false
       - key: SUPABASE_DB_POOL_URL
@@ -25,6 +53,8 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: AUTH_SIGNUP_ENABLED
+        value: "false"
       - key: RATE_LIMIT_WINDOW_MS
         value: "60000"
       - key: RATE_LIMIT_MAX
@@ -33,6 +63,18 @@ services:
         value: "20"
       - key: PARSER_RATE_LIMIT_MAX
         value: "30"
+      - key: PARSER_QUEUE_ENABLED
+        value: "true"
+      - key: PARSER_QUEUE_CONCURRENCY
+        value: "2"
+      - key: PARSER_QUEUE_MAX_ATTEMPTS
+        value: "3"
+      - key: PARSER_QUEUE_RETRY_DELAY_MS
+        value: "1000"
+      - key: PARSER_SYNC_WAIT_MS
+        value: "3000"
+      - key: PARSER_JOB_TTL_MS
+        value: "3600000"
       - key: AUTH_UPSTREAM_TIMEOUT_MS
         value: "1200"
       - key: AUTH_UPSTREAM_RETRIES

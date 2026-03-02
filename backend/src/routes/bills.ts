@@ -419,6 +419,10 @@ billsRouter.get(
   asyncHandler(async (req, res) => {
     const ownerUserId = getAuthUserId(req);
     const query = parseQuery(billsQuerySchema, req.query);
+    const paginationRequested = query.page !== undefined || query.pageSize !== undefined;
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+    const sqlPaginationAllowed = paginationRequested && !query.status;
 
     const filters: string[] = ['owner_user_id = $1'];
     const values: unknown[] = [ownerUserId];
@@ -437,28 +441,77 @@ billsRouter.get(
         filters.push(`date <= $${values.length}`);
       }
     }
+    if (query.updatedAfter) {
+      values.push(query.updatedAfter);
+      filters.push(`updated_at >= $${values.length}`);
+    }
     filters.push('deleted_at is null');
 
     const whereClause = `where ${filters.join(' and ')}`;
+    let totalCount = 0;
+    const billSelectValues = [...values];
+    let paginationClause = '';
+
+    if (sqlPaginationAllowed) {
+      const count = await dbQuery<{ total: number }>(
+        `
+          select count(*)::int as total
+          from bills
+          ${whereClause}
+        `,
+        values,
+      );
+      totalCount = count.rows[0]?.total ?? 0;
+
+      billSelectValues.push(pageSize);
+      const limitIdx = billSelectValues.length;
+      billSelectValues.push((page - 1) * pageSize);
+      const offsetIdx = billSelectValues.length;
+      paginationClause = `limit $${limitIdx} offset $${offsetIdx}`;
+    }
+
     const billRows = await dbQuery<BillRow>(
       `
         select id, bill_number, vendor_id, date, total_amount_paise, image_url, image_hash, created_at, updated_at
         from bills
         ${whereClause}
         order by date desc
+        ${paginationClause}
       `,
-      values,
+      billSelectValues,
     );
 
     const bills = await buildBillDocs(billRows.rows, true, ownerUserId);
     const paidByBill = await getPaymentTotalsByBillIds(bills.map((bill) => bill._id));
     const summarized = attachBillSummaries(bills, paidByBill, 30);
-    const filtered = query.status
+    const filteredByStatus = query.status
       ? summarized.filter((bill) => bill.status === query.status)
       : summarized;
+    const filtered = paginationRequested && !sqlPaginationAllowed
+      ? filteredByStatus.slice((page - 1) * pageSize, page * pageSize)
+      : filteredByStatus;
+
+    const paginationMeta = paginationRequested
+      ? {
+          page,
+          pageSize,
+          total: sqlPaginationAllowed ? totalCount : filteredByStatus.length,
+          totalPages: Math.ceil(
+            (sqlPaginationAllowed ? totalCount : filteredByStatus.length) / pageSize,
+          ),
+        }
+      : null;
 
     if (!query.includePayments) {
-      sendOk(res, filtered);
+      sendOk(
+        res,
+        paginationMeta
+          ? {
+              items: filtered,
+              ...paginationMeta,
+            }
+          : filtered,
+      );
       return;
     }
 
@@ -466,12 +519,19 @@ billsRouter.get(
       filtered.map((bill) => String(bill._id)),
     );
 
+    const payload = filtered.map((bill) => ({
+      ...bill,
+      payments: paymentsByBill.get(String(bill._id)) ?? [],
+    }));
+
     sendOk(
       res,
-      filtered.map((bill) => ({
-        ...bill,
-        payments: paymentsByBill.get(String(bill._id)) ?? [],
-      })),
+      paginationMeta
+        ? {
+            items: payload,
+            ...paginationMeta,
+          }
+        : payload,
     );
   }),
 );

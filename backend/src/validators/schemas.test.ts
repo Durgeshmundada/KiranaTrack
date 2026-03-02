@@ -80,4 +80,27 @@ describe('schema validation', () => {
 
     expect(result.success).toBe(false);
   });
+
+  it('parses valid pagination query params', () => {
+    const result = billsQuerySchema.safeParse({
+      page: '2',
+      pageSize: '25',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.data.page).toBe(2);
+    expect(result.data.pageSize).toBe(25);
+  });
+
+  it('rejects invalid pageSize query params', () => {
+    const result = billsQuerySchema.safeParse({
+      page: '1',
+      pageSize: '0',
+    });
+
+    expect(result.success).toBe(false);
+  });
 });

@@ -53,6 +53,7 @@ export interface Vendor {
   gstNumber: string | null;
   defaultCollectorName: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface OutOfStockItem {
@@ -60,6 +61,7 @@ export interface OutOfStockItem {
   itemName: string;
   status: OutOfStockStatus;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface UdhaarEntry {
@@ -76,6 +78,7 @@ export interface UdhaarCustomer {
   phone: string | null;
   entries: UdhaarEntry[];
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface AppSettings {

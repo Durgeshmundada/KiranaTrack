@@ -11,11 +11,12 @@ import {
 import { dbQuery, withTransaction } from '../db/postgres';
 import { asyncHandler } from '../utils/asyncHandler';
 import { getAuthUserId } from '../utils/authContext';
-import { HttpError, notFound, parseBody, sendCreated, sendOk } from '../utils/http';
+import { HttpError, notFound, parseBody, parseQuery, sendCreated, sendOk } from '../utils/http';
 import {
   createUdhaarCustomerSchema,
   createUdhaarEntrySchema,
   objectIdSchema,
+  updatedAfterQuerySchema,
 } from '../validators/schemas';
 import { recordAuditEvent } from '../services/audit';
 
@@ -68,14 +69,23 @@ udhaarRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const ownerUserId = getAuthUserId(req);
+    const query = parseQuery(updatedAfterQuerySchema, req.query);
+    const values: unknown[] = [ownerUserId];
+    const filters = ['owner_user_id = $1'];
+
+    if (query.updatedAfter) {
+      values.push(query.updatedAfter);
+      filters.push(`updated_at >= $${values.length}`);
+    }
+
     const customers = await dbQuery<UdhaarCustomerRow>(
       `
         select id, customer_name, phone, created_at, updated_at
         from udhaar_customers
-        where owner_user_id = $1
+        where ${filters.join(' and ')}
         order by created_at desc
       `,
-      [ownerUserId],
+      values,
     );
 
     const customerIds = customers.rows.map((row) => row.id);

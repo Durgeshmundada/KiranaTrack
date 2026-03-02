@@ -15,6 +15,13 @@ This guide deploys:
    - `SUPABASE_JWT_SECRET` (Authentication -> JWT settings)
    - `SUPABASE_DB_URL` (direct URL, fallback)
    - `SUPABASE_DB_POOL_URL` (Transaction pooler URL, recommended)
+   - `AUTH_SIGNUP_ENABLED` (`false` by default unless public signup is intended)
+   - `TRUST_PROXY` (`1` on Render)
+   - `HEALTH_DETAILS_TOKEN` (optional, required for `/health/detailed` in production when set)
+   - `METRICS_ENABLED` (`true` in production)
+   - `METRICS_TOKEN` (optional but recommended to protect `/metrics`)
+   - `ALERT_WEBHOOK_URL` (optional ops alert webhook)
+   - `ALERT_*` thresholds/cooldowns for alert policy
 
 Important:
 - Use `SUPABASE_DB_POOL_URL` in production to reduce connection issues and latency.
@@ -33,6 +40,18 @@ Important:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_JWT_SECRET`
+   - `AUTH_SIGNUP_ENABLED`
+   - `TRUST_PROXY`
+   - `HEALTH_DETAILS_TOKEN` (optional)
+   - `METRICS_ENABLED`
+   - `METRICS_TOKEN` (optional)
+   - `ALERT_WEBHOOK_URL` (optional)
+   - `ALERT_COOLDOWN_MS`
+   - `ALERT_EVALUATION_INTERVAL_MS`
+   - `ALERT_P95_LATENCY_MS`
+   - `ALERT_AUTH_FAILURES_THRESHOLD`
+   - `ALERT_DB_ERRORS_THRESHOLD`
+   - `ALERT_MIN_REQUESTS`
    - `GROQ_API_KEY` (if parser endpoints are needed)
 
 ### Option B: Manual Web Service
@@ -73,9 +92,13 @@ Backend:
 1. Verify health:
    - `GET <BACKEND_URL>/health`
 2. Verify detailed health:
-   - `GET <BACKEND_URL>/health/detailed`
-3. Run smoke test from local machine (after setting backend URL and valid env):
+   - `GET <BACKEND_URL>/health/detailed` with `x-health-token` header
+3. Verify metrics:
+   - `GET <BACKEND_URL>/metrics` (with `x-metrics-token` in production if configured)
+4. Run smoke test from local machine (after setting backend URL and valid env):
    - `npm --prefix backend run smoke:e2e`
+5. Run synthetic check against deployed URL:
+   - `SYNTHETIC_API_BASE_URL=<BACKEND_URL> SYNTHETIC_EMAIL=<EMAIL> SYNTHETIC_PASSWORD=<PASSWORD> npm --prefix backend run synthetic:check`
 
 Latency:
 1. Run benchmark:
@@ -94,3 +117,50 @@ Latency:
 - Parser key configured only on backend (`GROQ_API_KEY`)
 - No service role key in mobile app
 - Rate limits verified for expected traffic
+
+## 6) Synthetic Uptime Monitoring
+
+GitHub workflow:
+- `.github/workflows/synthetic-uptime.yml`
+
+Required repository secrets:
+- `SYNTHETIC_API_BASE_URL`
+- `SYNTHETIC_EMAIL`
+- `SYNTHETIC_PASSWORD`
+- `SYNTHETIC_HEALTH_TOKEN` (optional)
+
+What it does:
+- Runs every 5 minutes.
+- Checks `/health` (and `/health/detailed` if token provided).
+- Executes login + create/update/delete checks on vendor/bill/payment flows.
+- Fails fast on any auth/API regression.
+
+## 7) Staged Rollout and Rollback
+
+GitHub workflow:
+- `.github/workflows/deploy-staged-rollout.yml`
+
+Required repository secrets:
+- `RENDER_STAGING_DEPLOY_HOOK`
+- `RENDER_PROD_DEPLOY_HOOK`
+- `STAGING_SYNTHETIC_API_BASE_URL`
+- `STAGING_SYNTHETIC_EMAIL`
+- `STAGING_SYNTHETIC_PASSWORD`
+- `STAGING_SYNTHETIC_HEALTH_TOKEN` (optional)
+- `PROD_SYNTHETIC_API_BASE_URL`
+- `PROD_SYNTHETIC_EMAIL`
+- `PROD_SYNTHETIC_PASSWORD`
+- `PROD_SYNTHETIC_HEALTH_TOKEN` (optional)
+
+Rollout sequence:
+1. Trigger staging deploy.
+2. Run synthetic checks on staging.
+3. Trigger production deploy only if staging synthetic passes.
+4. Run production synthetic checks immediately after deploy.
+
+Rollback runbook:
+1. Open Render production service -> Deploys.
+2. Select last known-good deploy.
+3. Click `Rollback` and wait for health to recover.
+4. Re-run synthetic check and verify `/health`, `/health/detailed`, `/metrics`.
+5. Record incident with failing commit hash and root cause before next rollout.

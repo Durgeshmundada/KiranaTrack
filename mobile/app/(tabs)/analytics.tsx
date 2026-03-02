@@ -1,10 +1,17 @@
 import { StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { t } from '@/i18n';
+import {
+  fetchAnalyticsSummary,
+  fetchMonthlySpendAnalytics,
+  fetchPriceAnomaliesAnalytics,
+  fetchVendorOutstandingAnalytics,
+} from '@/services/backendData';
 import { useAppStore } from '@/store/appStore';
 import {
   monthlySpend,
@@ -34,17 +41,109 @@ export default function AnalyticsScreen() {
   const vendors = useAppStore((state) => state.vendors);
   const customers = useAppStore((state) => state.customers);
   const overdueThresholdDays = useAppStore((state) => state.settings.overdueThresholdDays);
+  const lastSyncAt = useAppStore((state) => state.lastSyncAt);
 
-  const vendorOutstanding = vendorWiseOutstanding(bills, vendors, overdueThresholdDays).slice(0, 6);
-  const spendTrend = monthlySpend(bills);
+  const [remoteSummary, setRemoteSummary] = useState<{
+    outstandingPaise: number;
+    receivablePaise: number;
+    netPositionPaise: number;
+  } | null>(null);
+  const [remoteVendorOutstanding, setRemoteVendorOutstanding] = useState<
+    Array<{ vendorName: string; outstandingPaise: number }>
+  >([]);
+  const [remoteMonthlySpend, setRemoteMonthlySpend] = useState<
+    Array<{ month: string; totalPaidPaise: number }>
+  >([]);
+  const [remoteAnomalies, setRemoteAnomalies] = useState<
+    Array<{ id: string; item: string; deltaPaise: number; vendorName: string }>
+  >([]);
+  const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadRemoteAnalytics = async () => {
+      const [summaryResult, vendorResult, monthlyResult, anomaliesResult] =
+        await Promise.allSettled([
+          fetchAnalyticsSummary(),
+          fetchVendorOutstandingAnalytics(),
+          fetchMonthlySpendAnalytics(),
+          fetchPriceAnomaliesAnalytics(),
+        ]);
+
+      if (!active) {
+        return;
+      }
+
+      if (summaryResult.status === 'fulfilled') {
+        setRemoteSummary(summaryResult.value);
+      }
+      if (vendorResult.status === 'fulfilled') {
+        setRemoteVendorOutstanding(
+          vendorResult.value.slice(0, 6).map((item) => ({
+            vendorName: item.vendorName,
+            outstandingPaise: item.outstandingPaise,
+          })),
+        );
+      }
+      if (monthlyResult.status === 'fulfilled') {
+        setRemoteMonthlySpend(monthlyResult.value);
+      }
+      if (anomaliesResult.status === 'fulfilled') {
+        setRemoteAnomalies(
+          anomaliesResult.value.slice(0, 3).map((item) => ({
+            id: `${item.billNumber}-${item.itemName}`,
+            item: item.itemName,
+            deltaPaise: item.differencePaise,
+            vendorName: item.vendorName,
+          })),
+        );
+      }
+
+      const failed =
+        summaryResult.status === 'rejected' &&
+        vendorResult.status === 'rejected' &&
+        monthlyResult.status === 'rejected' &&
+        anomaliesResult.status === 'rejected';
+      setRemoteError(
+        failed
+          ? 'Live analytics unavailable. Showing locally computed fallback.'
+          : null,
+      );
+      setRemoteLoaded(true);
+    };
+
+    void loadRemoteAnalytics();
+
+    return () => {
+      active = false;
+    };
+  }, [lastSyncAt]);
+
+  const localVendorOutstanding = vendorWiseOutstanding(
+    bills,
+    vendors,
+    overdueThresholdDays,
+  ).slice(0, 6);
+  const localSpendTrend = monthlySpend(bills);
   const breakdown = statusBreakdown(bills, overdueThresholdDays);
   const statusReady = withComputedStatus(bills, overdueThresholdDays);
 
-  const outstandingTotal = statusReady.reduce((sum, bill) => sum + bill.remainingPaise, 0);
-  const receivableTotal = totalsForCustomers(customers).receivablePaise;
+  const outstandingTotalLocal = statusReady.reduce(
+    (sum, bill) => sum + bill.remainingPaise,
+    0,
+  );
+  const receivableTotalLocal = totalsForCustomers(customers).receivablePaise;
+
+  const vendorOutstanding =
+    remoteVendorOutstanding.length > 0 ? remoteVendorOutstanding : localVendorOutstanding;
+  const spendTrend = remoteMonthlySpend.length > 0 ? remoteMonthlySpend : localSpendTrend;
+  const outstandingTotal = remoteSummary?.outstandingPaise ?? outstandingTotalLocal;
+  const receivableTotal = remoteSummary?.receivablePaise ?? receivableTotalLocal;
   const netPosition = receivableTotal - outstandingTotal;
 
-  const anomalyCandidates = (() => {
+  const localAnomalyCandidates = useMemo(() => {
     const groupedRates = new Map<
       string,
       Array<{ billId: string; itemName: string; ratePaise: number; billDate: string }>
@@ -96,11 +195,23 @@ export default function AnalyticsScreen() {
       .filter((row): row is NonNullable<typeof row> => Boolean(row))
       .sort((a, b) => b.deltaPaise - a.deltaPaise)
       .slice(0, 3);
-  })();
+  }, [statusReady, vendors]);
+
+  const anomalyCandidates = remoteAnomalies.length > 0 ? remoteAnomalies : localAnomalyCandidates;
 
   return (
     <ScreenContainer contentStyle={styles.content}>
       <ScreenHeader title={t('analytics')} subtitle={t('netPosition')} />
+      {remoteError ? (
+        <GlassCard style={styles.card}>
+          <AppText variant="caption">{remoteError}</AppText>
+        </GlassCard>
+      ) : null}
+      {!remoteLoaded ? (
+        <GlassCard style={styles.card}>
+          <AppText variant="caption">Loading live analytics...</AppText>
+        </GlassCard>
+      ) : null}
 
       <GlassCard style={styles.card}>
         <AppText variant="subtitle">{t('vendorOutstanding')}</AppText>

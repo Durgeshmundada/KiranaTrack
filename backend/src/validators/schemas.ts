@@ -87,6 +87,40 @@ const booleanQuerySchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+const optionalPageQuerySchema = z.preprocess((value) => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === 'string' && value.trim() === '') {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+
+  return value;
+}, z.number().int().min(1));
+
+const optionalPageSizeQuerySchema = z.preprocess((value) => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === 'string' && value.trim() === '') {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+
+  return value;
+}, z.number().int().min(1).max(200));
+
 const optionalQueryDateSchema = z.preprocess((value) => {
   if (typeof value === 'string' && value.trim() === '') {
     return undefined;
@@ -99,7 +133,10 @@ export const billsQuerySchema = z.object({
   vendor: objectIdSchema.optional(),
   dateFrom: optionalQueryDateSchema.optional(),
   dateTo: optionalQueryDateSchema.optional(),
+  updatedAfter: optionalQueryDateSchema.optional(),
   includePayments: booleanQuerySchema.optional().default(false),
+  page: optionalPageQuerySchema.optional(),
+  pageSize: optionalPageSizeQuerySchema.optional(),
 }).superRefine((value, context) => {
   if (value.dateFrom && value.dateTo && value.dateFrom > value.dateTo) {
     context.addIssue({
@@ -108,6 +145,10 @@ export const billsQuerySchema = z.object({
       message: 'dateFrom cannot be after dateTo',
     });
   }
+});
+
+export const updatedAfterQuerySchema = z.object({
+  updatedAfter: optionalQueryDateSchema.optional(),
 });
 
 export const createPaymentSchema = z.object({

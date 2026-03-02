@@ -7,8 +7,13 @@ import { dbQuery } from '../db/postgres';
 import { hasVendorIdentityConflict } from '../services/vendorIdentity';
 import { asyncHandler } from '../utils/asyncHandler';
 import { getAuthUserId } from '../utils/authContext';
-import { HttpError, notFound, parseBody, sendCreated, sendOk } from '../utils/http';
-import { createVendorSchema, objectIdSchema, updateVendorSchema } from '../validators/schemas';
+import { HttpError, notFound, parseBody, parseQuery, sendCreated, sendOk } from '../utils/http';
+import {
+  createVendorSchema,
+  objectIdSchema,
+  updateVendorSchema,
+  updatedAfterQuerySchema,
+} from '../validators/schemas';
 
 const idParamSchema = z.object({
   id: objectIdSchema,
@@ -33,14 +38,22 @@ vendorsRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
     const ownerUserId = getAuthUserId(_req);
+    const query = parseQuery(updatedAfterQuerySchema, _req.query);
+    const values: unknown[] = [ownerUserId];
+    const filters = ['owner_user_id = $1'];
+    if (query.updatedAfter) {
+      values.push(query.updatedAfter);
+      filters.push(`updated_at >= $${values.length}`);
+    }
+
     const vendors = await dbQuery<VendorRow>(
       `
         select id, name, phone, gst_number, default_collector_name, created_at, updated_at
         from vendors
-        where owner_user_id = $1
+        where ${filters.join(' and ')}
         order by created_at desc
       `,
-      [ownerUserId],
+      values,
     );
     sendOk(
       res,

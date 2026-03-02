@@ -1,0 +1,33 @@
+name: Synthetic Uptime
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  synthetic-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Run synthetic login + CRUD check
+        env:
+          SYNTHETIC_API_BASE_URL: ${{ secrets.SYNTHETIC_API_BASE_URL }}
+          SYNTHETIC_EMAIL: ${{ secrets.SYNTHETIC_EMAIL }}
+          SYNTHETIC_PASSWORD: ${{ secrets.SYNTHETIC_PASSWORD }}
+          SYNTHETIC_HEALTH_TOKEN: ${{ secrets.SYNTHETIC_HEALTH_TOKEN }}
+          SYNTHETIC_TIMEOUT_MS: "10000"
+        run: npm --prefix backend run synthetic:check

@@ -1,0 +1,52 @@
+name: Deploy Staged Rollout
+
+on:
+  workflow_dispatch:
+
+jobs:
+  staged-rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Trigger staging deploy
+        run: curl -fsSL -X POST "${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}"
+
+      - name: Wait for staging boot
+        run: sleep 90
+
+      - name: Run staging synthetic check
+        env:
+          SYNTHETIC_API_BASE_URL: ${{ secrets.STAGING_SYNTHETIC_API_BASE_URL }}
+          SYNTHETIC_EMAIL: ${{ secrets.STAGING_SYNTHETIC_EMAIL }}
+          SYNTHETIC_PASSWORD: ${{ secrets.STAGING_SYNTHETIC_PASSWORD }}
+          SYNTHETIC_HEALTH_TOKEN: ${{ secrets.STAGING_SYNTHETIC_HEALTH_TOKEN }}
+          SYNTHETIC_TIMEOUT_MS: "10000"
+        run: npm --prefix backend run synthetic:check
+
+      - name: Trigger production deploy
+        run: curl -fsSL -X POST "${{ secrets.RENDER_PROD_DEPLOY_HOOK }}"
+
+      - name: Wait for production boot
+        run: sleep 90
+
+      - name: Run production synthetic check
+        env:
+          SYNTHETIC_API_BASE_URL: ${{ secrets.PROD_SYNTHETIC_API_BASE_URL }}
+          SYNTHETIC_EMAIL: ${{ secrets.PROD_SYNTHETIC_EMAIL }}
+          SYNTHETIC_PASSWORD: ${{ secrets.PROD_SYNTHETIC_PASSWORD }}
+          SYNTHETIC_HEALTH_TOKEN: ${{ secrets.PROD_SYNTHETIC_HEALTH_TOKEN }}
+          SYNTHETIC_TIMEOUT_MS: "10000"
+        run: npm --prefix backend run synthetic:check

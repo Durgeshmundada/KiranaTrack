@@ -7,6 +7,8 @@ import {
 import dns from 'node:dns';
 
 import { env } from '../config/env';
+import { logError, logInfo, logWarn } from '../observability/logger';
+import { recordDbErrorMetric, recordDbQueryMetric } from '../observability/metrics';
 
 // Render free instances frequently fail on IPv6 routes; prefer IPv4 DB records.
 dns.setDefaultResultOrder('ipv4first');
@@ -37,18 +39,24 @@ const pool = new Pool({
 
 pool.on('connect', () => {
   state = 'connected';
+  logInfo('db.pool.connected');
 });
 
 pool.on('remove', () => {
   if (state !== 'disconnecting') {
     state = 'disconnected';
   }
+  logInfo('db.pool.client_removed');
 });
 
-pool.on('error', () => {
+pool.on('error', (error) => {
   if (state !== 'disconnecting') {
     state = 'disconnected';
   }
+  recordDbErrorMetric('pool_error');
+  logError('db.pool.error', {
+    error: error instanceof Error ? error.message : String(error),
+  });
 });
 
 export const connectDatabase = async (): Promise<void> => {
@@ -57,8 +65,13 @@ export const connectDatabase = async (): Promise<void> => {
   try {
     await client.query('select 1');
     state = 'connected';
+    logInfo('db.connect.success');
   } catch (error) {
     state = 'disconnected';
+    recordDbErrorMetric('connect_error');
+    logError('db.connect.failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   } finally {
     client.release();
@@ -71,6 +84,7 @@ export const closeDatabase = async (): Promise<void> => {
   state = 'disconnecting';
   await pool.end();
   state = 'disconnected';
+  logInfo('db.pool.closed');
 };
 
 type Queryable = Pool | PoolClient;
@@ -82,7 +96,27 @@ export const dbQuery = async <T extends QueryResultRow>(
   values: unknown[] = [],
   client?: PoolClient,
 ): Promise<QueryResult<T>> => {
-  return getQueryable(client).query<T>(text, values);
+  const startedAtNs = process.hrtime.bigint();
+  try {
+    const result = await getQueryable(client).query<T>(text, values);
+    const durationMs = Number(process.hrtime.bigint() - startedAtNs) / 1_000_000;
+    recordDbQueryMetric({ durationMs, result: 'ok' });
+    return result;
+  } catch (error) {
+    const durationMs = Number(process.hrtime.bigint() - startedAtNs) / 1_000_000;
+    recordDbQueryMetric({ durationMs, result: 'error' });
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code ?? 'query_error')
+        : 'query_error';
+    recordDbErrorMetric(code);
+    logWarn('db.query.failed', {
+      durationMs: Math.round(durationMs),
+      code,
+      statementPreview: text.slice(0, 120),
+    });
+    throw error;
+  }
 };
 
 export const withTransaction = async <T>(
@@ -95,7 +129,17 @@ export const withTransaction = async <T>(
     await client.query('commit');
     return result;
   } catch (error) {
-    await client.query('rollback');
+    try {
+      await client.query('rollback');
+    } catch (rollbackError) {
+      recordDbErrorMetric('rollback_failed');
+      logError('db.transaction.rollback_failed', {
+        error:
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : String(rollbackError),
+      });
+    }
     throw error;
   } finally {
     client.release();

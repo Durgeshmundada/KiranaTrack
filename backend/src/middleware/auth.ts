@@ -4,6 +4,9 @@ import { createClient } from '@supabase/supabase-js';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { env } from '../config/env';
+import { logError, logWarn } from '../observability/logger';
+import { recordAuthFailureMetric } from '../observability/metrics';
+import { claimLegacyOwnership } from '../services/ownerMigration';
 import { HttpError } from '../utils/http';
 
 const AUTH_UPSTREAM_TIMEOUT_MS = env.AUTH_UPSTREAM_TIMEOUT_MS;
@@ -194,6 +197,7 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
 
   const token = extractBearerToken(req.headers.authorization);
   if (!token) {
+    recordAuthFailureMetric('missing_bearer_token');
     next(new HttpError(401, 'Authentication required'));
     return;
   }
@@ -202,6 +206,7 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
     try {
       const claims = await getTokenClaims(token);
       if (!claims) {
+        recordAuthFailureMetric('invalid_or_expired_token');
         next(new HttpError(401, 'Invalid or expired token'));
         return;
       }
@@ -210,8 +215,19 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
       request.authUserId = claims.userId;
       request.authRole = claims.role;
 
+      await claimLegacyOwnership(claims.userId).catch((error) => {
+        logError('auth.legacy_ownership_claim_failed', {
+          userId: claims.userId,
+          error: error instanceof Error ? error.message : error,
+        });
+      });
+
       next();
-    } catch {
+    } catch (error) {
+      recordAuthFailureMetric('auth_verification_exception');
+      logWarn('auth.verification_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       next(new HttpError(401, 'Invalid or expired token'));
     }
   })();
