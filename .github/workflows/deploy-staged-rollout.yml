@@ -7,6 +7,9 @@ jobs:
   staged-rollout:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HAS_STAGING_HOOK: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK != '' }}
+      HAS_PROD_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,12 +25,15 @@ jobs:
         run: npm --prefix backend ci
 
       - name: Trigger staging deploy
+        if: env.HAS_STAGING_HOOK == 'true'
         run: curl -fsSL -X POST "${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}"
 
       - name: Wait for staging boot
+        if: env.HAS_STAGING_HOOK == 'true'
         run: sleep 90
 
       - name: Run staging synthetic check
+        if: env.HAS_STAGING_HOOK == 'true'
         env:
           SYNTHETIC_API_BASE_URL: ${{ secrets.STAGING_SYNTHETIC_API_BASE_URL }}
           SYNTHETIC_EMAIL: ${{ secrets.STAGING_SYNTHETIC_EMAIL }}
@@ -36,13 +42,22 @@ jobs:
           SYNTHETIC_TIMEOUT_MS: "10000"
         run: npm --prefix backend run synthetic:check
 
+      - name: Ensure production deploy hook exists
+        if: env.HAS_PROD_HOOK != 'true'
+        run: |
+          echo "RENDER_PROD_DEPLOY_HOOK is missing. Cannot trigger production deploy."
+          exit 1
+
       - name: Trigger production deploy
+        if: env.HAS_PROD_HOOK == 'true'
         run: curl -fsSL -X POST "${{ secrets.RENDER_PROD_DEPLOY_HOOK }}"
 
       - name: Wait for production boot
+        if: env.HAS_PROD_HOOK == 'true'
         run: sleep 90
 
       - name: Run production synthetic check
+        if: env.HAS_PROD_HOOK == 'true'
         env:
           SYNTHETIC_API_BASE_URL: ${{ secrets.PROD_SYNTHETIC_API_BASE_URL }}
           SYNTHETIC_EMAIL: ${{ secrets.PROD_SYNTHETIC_EMAIL }}
