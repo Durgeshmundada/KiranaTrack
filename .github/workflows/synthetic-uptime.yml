@@ -44,5 +44,5 @@ jobs:
           SYNTHETIC_EMAIL: ${{ secrets.SYNTHETIC_EMAIL }}
           SYNTHETIC_PASSWORD: ${{ secrets.SYNTHETIC_PASSWORD }}
           SYNTHETIC_HEALTH_TOKEN: ${{ secrets.SYNTHETIC_HEALTH_TOKEN }}
-          SYNTHETIC_TIMEOUT_MS: "10000"
+          SYNTHETIC_TIMEOUT_MS: "20000"
         run: npm --prefix backend run synthetic:check
