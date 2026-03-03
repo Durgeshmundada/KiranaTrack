@@ -102,6 +102,13 @@ if (!parsed.success) {
 }
 
 const envData = parsed.data;
+const renderExternalUrl = process.env.RENDER_EXTERNAL_URL?.trim();
+const resolvedCorsOrigin =
+  envData.NODE_ENV === 'production' &&
+  envData.CORS_ORIGIN === '*' &&
+  renderExternalUrl
+    ? renderExternalUrl
+    : envData.CORS_ORIGIN;
 
 if (!envData.SUPABASE_DB_POOL_URL && !envData.SUPABASE_DB_URL) {
   throw new Error('Invalid environment configuration: set SUPABASE_DB_POOL_URL or SUPABASE_DB_URL');
@@ -115,8 +122,11 @@ if (envData.NODE_ENV === 'production' && !envData.SUPABASE_JWT_SECRET) {
   throw new Error('Invalid environment configuration: SUPABASE_JWT_SECRET is required in production');
 }
 
-if (envData.NODE_ENV === 'production' && envData.CORS_ORIGIN === '*') {
+if (envData.NODE_ENV === 'production' && resolvedCorsOrigin === '*') {
   throw new Error('Invalid environment configuration: CORS_ORIGIN must be explicit in production');
 }
 
-export const env = envData;
+export const env = {
+  ...envData,
+  CORS_ORIGIN: resolvedCorsOrigin,
+};
