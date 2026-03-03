@@ -4,6 +4,26 @@ This guide deploys:
 - Backend API to Render (`render.yaml`)
 - Mobile app builds via EAS (`mobile/eas.json`)
 
+## 0) First-Time Bootstrap (Required Once)
+
+Before enabling scheduled synthetic monitoring, complete this bootstrap:
+1. Create a dedicated synthetic monitor account (do not use a personal account).
+2. Confirm the synthetic account can log in against production backend once.
+3. Add GitHub Actions repository secrets:
+   - `SYNTHETIC_API_BASE_URL`
+   - `SYNTHETIC_EMAIL`
+   - `SYNTHETIC_PASSWORD`
+   - `SYNTHETIC_HEALTH_TOKEN` (optional)
+4. If using staged rollout workflow, also add:
+   - `STAGING_SYNTHETIC_API_BASE_URL`
+   - `STAGING_SYNTHETIC_EMAIL`
+   - `STAGING_SYNTHETIC_PASSWORD`
+   - `STAGING_SYNTHETIC_HEALTH_TOKEN` (optional)
+   - `PROD_SYNTHETIC_API_BASE_URL`
+   - `PROD_SYNTHETIC_EMAIL`
+   - `PROD_SYNTHETIC_PASSWORD`
+   - `PROD_SYNTHETIC_HEALTH_TOKEN` (optional)
+
 ## 1) Supabase Prerequisites
 
 1. Open Supabase dashboard for your project.
@@ -98,7 +118,7 @@ Backend:
 4. Run smoke test from local machine (after setting backend URL and valid env):
    - `npm --prefix backend run smoke:e2e`
 5. Run synthetic check against deployed URL:
-   - `SYNTHETIC_API_BASE_URL=<BACKEND_URL> SYNTHETIC_EMAIL=<EMAIL> SYNTHETIC_PASSWORD=<PASSWORD> npm --prefix backend run synthetic:check`
+   - `SYNTHETIC_API_BASE_URL=<BACKEND_URL> SYNTHETIC_EMAIL=<EMAIL> SYNTHETIC_PASSWORD=<PASSWORD> SYNTHETIC_VENDOR_NAME="KiranaTrack Synthetic Monitor Vendor" npm --prefix backend run synthetic:check`
 
 Latency:
 1. Run benchmark:
@@ -133,6 +153,7 @@ What it does:
 - Runs every 5 minutes.
 - Checks `/health` (and `/health/detailed` if token provided).
 - Executes login + create/update/delete checks on vendor/bill/payment flows.
+- Reuses a fixed synthetic vendor name so monitoring does not create endless vendor records.
 - Fails fast on any auth/API regression.
 
 ## 7) Staged Rollout and Rollback

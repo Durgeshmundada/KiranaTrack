@@ -13,6 +13,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate required synthetic secrets
+        env:
+          SYNTHETIC_API_BASE_URL: ${{ secrets.SYNTHETIC_API_BASE_URL }}
+          SYNTHETIC_EMAIL: ${{ secrets.SYNTHETIC_EMAIL }}
+          SYNTHETIC_PASSWORD: ${{ secrets.SYNTHETIC_PASSWORD }}
+        run: |
+          missing=()
+          [[ -z "${SYNTHETIC_API_BASE_URL}" ]] && missing+=("SYNTHETIC_API_BASE_URL")
+          [[ -z "${SYNTHETIC_EMAIL}" ]] && missing+=("SYNTHETIC_EMAIL")
+          [[ -z "${SYNTHETIC_PASSWORD}" ]] && missing+=("SYNTHETIC_PASSWORD")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing required repository secrets: ${missing[*]}"
+            exit 1
+          fi
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:

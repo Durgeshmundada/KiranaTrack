@@ -2,6 +2,9 @@ const apiBaseUrl = (process.env.SYNTHETIC_API_BASE_URL ?? '').trim().replace(/\/
 const syntheticEmail = (process.env.SYNTHETIC_EMAIL ?? '').trim().toLowerCase();
 const syntheticPassword = process.env.SYNTHETIC_PASSWORD ?? '';
 const syntheticHealthToken = (process.env.SYNTHETIC_HEALTH_TOKEN ?? '').trim();
+const syntheticVendorName = (
+  process.env.SYNTHETIC_VENDOR_NAME ?? 'KiranaTrack Synthetic Monitor Vendor'
+).trim();
 const requestTimeoutMs = Math.min(
   Math.max(Number(process.env.SYNTHETIC_TIMEOUT_MS ?? 9000), 3000),
   30000,
@@ -13,6 +16,10 @@ if (!apiBaseUrl) {
 
 if (!syntheticEmail || !syntheticPassword) {
   throw new Error('SYNTHETIC_EMAIL and SYNTHETIC_PASSWORD are required');
+}
+
+if (!syntheticVendorName) {
+  throw new Error('SYNTHETIC_VENDOR_NAME must not be empty');
 }
 
 const withTimeout = async (url, init = {}) => {
@@ -97,7 +104,6 @@ const run = async () => {
   };
 
   const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const vendorName = `Synthetic Vendor ${uniqueSuffix}`;
   const billNumber = `SYN-${uniqueSuffix}`;
   const billDate = new Date().toISOString();
 
@@ -105,7 +111,7 @@ const run = async () => {
     method: 'POST',
     headers: authHeaders,
     body: JSON.stringify({
-      name: vendorName,
+      name: syntheticVendorName,
       phone: null,
       gstNumber: null,
       defaultCollectorName: 'Synthetic Collector',
@@ -202,6 +208,7 @@ const run = async () => {
   logStep('synthetic check passed', {
     apiBaseUrl,
     requestTimeoutMs,
+    syntheticVendorName,
   });
 };
 

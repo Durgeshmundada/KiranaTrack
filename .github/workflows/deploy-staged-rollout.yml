@@ -24,6 +24,22 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
+      - name: Validate staging synthetic secrets
+        if: env.HAS_STAGING_HOOK == 'true'
+        env:
+          STAGING_SYNTHETIC_API_BASE_URL: ${{ secrets.STAGING_SYNTHETIC_API_BASE_URL }}
+          STAGING_SYNTHETIC_EMAIL: ${{ secrets.STAGING_SYNTHETIC_EMAIL }}
+          STAGING_SYNTHETIC_PASSWORD: ${{ secrets.STAGING_SYNTHETIC_PASSWORD }}
+        run: |
+          missing=()
+          [[ -z "${STAGING_SYNTHETIC_API_BASE_URL}" ]] && missing+=("STAGING_SYNTHETIC_API_BASE_URL")
+          [[ -z "${STAGING_SYNTHETIC_EMAIL}" ]] && missing+=("STAGING_SYNTHETIC_EMAIL")
+          [[ -z "${STAGING_SYNTHETIC_PASSWORD}" ]] && missing+=("STAGING_SYNTHETIC_PASSWORD")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing required staging synthetic secrets: ${missing[*]}"
+            exit 1
+          fi
+
       - name: Trigger staging deploy
         if: env.HAS_STAGING_HOOK == 'true'
         run: curl -fsSL -X POST "${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}"
@@ -47,6 +63,22 @@ jobs:
         run: |
           echo "RENDER_PROD_DEPLOY_HOOK is missing. Cannot trigger production deploy."
           exit 1
+
+      - name: Validate production synthetic secrets
+        if: env.HAS_PROD_HOOK == 'true'
+        env:
+          PROD_SYNTHETIC_API_BASE_URL: ${{ secrets.PROD_SYNTHETIC_API_BASE_URL }}
+          PROD_SYNTHETIC_EMAIL: ${{ secrets.PROD_SYNTHETIC_EMAIL }}
+          PROD_SYNTHETIC_PASSWORD: ${{ secrets.PROD_SYNTHETIC_PASSWORD }}
+        run: |
+          missing=()
+          [[ -z "${PROD_SYNTHETIC_API_BASE_URL}" ]] && missing+=("PROD_SYNTHETIC_API_BASE_URL")
+          [[ -z "${PROD_SYNTHETIC_EMAIL}" ]] && missing+=("PROD_SYNTHETIC_EMAIL")
+          [[ -z "${PROD_SYNTHETIC_PASSWORD}" ]] && missing+=("PROD_SYNTHETIC_PASSWORD")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing required production synthetic secrets: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Trigger production deploy
         if: env.HAS_PROD_HOOK == 'true'
