@@ -33,7 +33,7 @@ const pool = new Pool({
   keepAlive: true,
   keepAliveInitialDelayMillis: 10_000,
   ssl: {
-    rejectUnauthorized: env.NODE_ENV === 'production',
+    rejectUnauthorized: false,
   },
 });
 

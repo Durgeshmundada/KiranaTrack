@@ -25,13 +25,6 @@ import { errorMiddleware } from './utils/http';
 const app = express();
 app.set('trust proxy', env.TRUST_PROXY);
 
-if (env.NODE_ENV === 'production' && env.CORS_ORIGIN === '*') {
-  throw new Error(
-    'CORS_ORIGIN must be explicitly set in production (not wildcard). ' +
-      'Example: CORS_ORIGIN=https://app.example.com',
-  );
-}
-
 const corsOriginConfig =
   env.CORS_ORIGIN === '*'
     ? true
