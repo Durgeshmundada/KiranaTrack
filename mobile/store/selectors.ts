@@ -108,4 +108,4 @@ export const recentPayments = (bills: Bill[], vendors: Vendor[]) =>
       })),
     )
     .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 5);
+    .slice(0, 20);

@@ -20,6 +20,7 @@ type ParserJobPayload =
 
 type ParserJobState = {
   id: string;
+  ownerUserId: string;
   type: ParserJobType;
   status: ParserJobStatus;
   attempts: number;
@@ -45,6 +46,7 @@ const wait = (ms: number): Promise<void> =>
 
 const toSnapshot = (job: ParserJobState): ParserJobSnapshot => ({
   id: job.id,
+  ownerUserId: job.ownerUserId,
   type: job.type,
   status: job.status,
   attempts: job.attempts,
@@ -154,12 +156,13 @@ const startCleanupLoop = (): void => {
   }, Math.min(60_000, env.PARSER_JOB_TTL_MS)).unref();
 };
 
-export const enqueueParserJob = (payload: ParserJobPayload): { jobId: string } => {
+export const enqueueParserJob = (payload: ParserJobPayload, ownerUserId: string): { jobId: string } => {
   startCleanupLoop();
   const id = randomUUID();
   const createdAt = nowIso();
   const job: ParserJobState = {
     id,
+    ownerUserId,
     type: payload.type,
     status: 'queued',
     attempts: 0,
@@ -179,18 +182,25 @@ export const enqueueParserJob = (payload: ParserJobPayload): { jobId: string } =
   return { jobId: id };
 };
 
-export const getParserJob = (jobId: string): ParserJobSnapshot | null => {
+export const getParserJob = (jobId: string, ownerUserId?: string): ParserJobSnapshot | null => {
   const job = jobs.get(jobId);
-  return job ? toSnapshot(job) : null;
+  if (!job) {
+    return null;
+  }
+  if (ownerUserId && job.ownerUserId !== ownerUserId) {
+    return null;
+  }
+  return toSnapshot(job);
 };
 
 export const waitForParserJob = async (
   jobId: string,
   timeoutMs: number,
+  ownerUserId?: string,
 ): Promise<ParserJobSnapshot | null> => {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const snapshot = getParserJob(jobId);
+    const snapshot = getParserJob(jobId, ownerUserId);
     if (!snapshot) {
       return null;
     }
@@ -200,5 +210,5 @@ export const waitForParserJob = async (
     await wait(120);
   }
 
-  return getParserJob(jobId);
+  return getParserJob(jobId, ownerUserId);
 };

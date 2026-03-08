@@ -5,6 +5,7 @@ import { env } from '../config/env';
 import { parseBillImageWithGroq, parseBillTextWithGroq } from '../services/groqParser';
 import { enqueueParserJob, getParserJob, waitForParserJob } from '../services/parserQueue';
 import { asyncHandler } from '../utils/asyncHandler';
+import { getAuthUserId } from '../utils/authContext';
 import { HttpError, notFound, parseBody, sendOk } from '../utils/http';
 import { parseBillImageSchema, parseBillTextSchema } from '../validators/schemas';
 
@@ -13,7 +14,7 @@ const jobIdParamSchema = z.object({
   jobId: z.string().min(1),
 });
 
-const runImageParsing = async (imageDataUrl: string) => {
+const runImageParsing = async (imageDataUrl: string, ownerUserId: string) => {
   if (!env.PARSER_QUEUE_ENABLED) {
     return parseBillImageWithGroq(imageDataUrl);
   }
@@ -21,8 +22,8 @@ const runImageParsing = async (imageDataUrl: string) => {
   const queued = enqueueParserJob({
     type: 'bill-image',
     imageDataUrl,
-  });
-  const job = await waitForParserJob(queued.jobId, env.PARSER_SYNC_WAIT_MS);
+  }, ownerUserId);
+  const job = await waitForParserJob(queued.jobId, env.PARSER_SYNC_WAIT_MS, ownerUserId);
 
   if (!job || job.status === 'queued' || job.status === 'processing') {
     return {
@@ -43,7 +44,7 @@ const runImageParsing = async (imageDataUrl: string) => {
       };
 };
 
-const runTextParsing = async (text: string) => {
+const runTextParsing = async (text: string, ownerUserId: string) => {
   if (!env.PARSER_QUEUE_ENABLED) {
     return parseBillTextWithGroq(text);
   }
@@ -51,8 +52,8 @@ const runTextParsing = async (text: string) => {
   const queued = enqueueParserJob({
     type: 'bill-text',
     text,
-  });
-  const job = await waitForParserJob(queued.jobId, env.PARSER_SYNC_WAIT_MS);
+  }, ownerUserId);
+  const job = await waitForParserJob(queued.jobId, env.PARSER_SYNC_WAIT_MS, ownerUserId);
 
   if (!job || job.status === 'queued' || job.status === 'processing') {
     return {
@@ -80,8 +81,9 @@ parseRouter.post(
       throw new HttpError(503, 'Parser service unavailable: GROQ_API_KEY not configured');
     }
 
+    const ownerUserId = getAuthUserId(req);
     const payload = parseBody(parseBillImageSchema, req.body);
-    const parsed = await runImageParsing(payload.imageDataUrl);
+    const parsed = await runImageParsing(payload.imageDataUrl, ownerUserId);
 
     if (parsed && typeof parsed === 'object' && 'status' in parsed) {
       if (parsed.status === 'processing') {
@@ -116,8 +118,9 @@ parseRouter.post(
       throw new HttpError(503, 'Parser service unavailable: GROQ_API_KEY not configured');
     }
 
+    const ownerUserId = getAuthUserId(req);
     const payload = parseBody(parseBillTextSchema, req.body);
-    const parsed = await runTextParsing(payload.text);
+    const parsed = await runTextParsing(payload.text, ownerUserId);
 
     if (parsed && typeof parsed === 'object' && 'status' in parsed) {
       if (parsed.status === 'processing') {
@@ -148,8 +151,9 @@ parseRouter.post(
 parseRouter.get(
   '/jobs/:jobId',
   asyncHandler(async (req, res) => {
+    const ownerUserId = getAuthUserId(req);
     const { jobId } = jobIdParamSchema.parse(req.params);
-    const job = getParserJob(jobId);
+    const job = getParserJob(jobId, ownerUserId);
     if (!job) {
       notFound('Parser job');
       return;

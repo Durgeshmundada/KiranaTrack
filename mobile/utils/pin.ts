@@ -45,6 +45,9 @@ export const getRemainingLockoutSeconds = async (): Promise<number> => {
 
 export const savePin = async (pin: string): Promise<void> => {
   const normalizedPin = pin.trim();
+  if (!/^\d{4}$/.test(normalizedPin)) {
+    throw new Error('PIN must be exactly 4 digits');
+  }
   const hash = await hashPin(normalizedPin);
   await SecureStore.setItemAsync(PIN_HASH_KEY, hash);
   await clearAttempts();
@@ -63,6 +66,12 @@ export const verifyPin = async (
   const remaining = await getRemainingLockoutSeconds();
   if (remaining > 0) {
     return { ok: false, remainingLockoutSeconds: remaining };
+  }
+  // Lockout expired — clear stale lockout state so attempts count fresh
+  const lockoutUntil = await getLockoutUntil();
+  if (lockoutUntil) {
+    await SecureStore.deleteItemAsync(PIN_LOCKOUT_KEY);
+    await clearAttempts();
   }
 
   const storedHash = await SecureStore.getItemAsync(PIN_HASH_KEY);
@@ -88,7 +97,8 @@ export const verifyPin = async (
   if (nextAttempts >= MAX_ATTEMPTS) {
     const lockoutUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000);
     await SecureStore.setItemAsync(PIN_LOCKOUT_KEY, lockoutUntil.toISOString());
-    await clearAttempts();
+    // Do NOT clear attempts here — they reset only on successful PIN entry.
+    // This prevents perpetual brute-force cycling (5 tries → wait → 5 more).
     return {
       ok: false,
       remainingLockoutSeconds: LOCKOUT_MINUTES * 60,

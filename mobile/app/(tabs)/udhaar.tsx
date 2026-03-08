@@ -21,17 +21,25 @@ export default function UdhaarScreen() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [search, setSearch] = useState('');
 
   const customers = useAppStore((state) => state.customers);
   const addCustomer = useAppStore((state) => state.addCustomer);
 
-  const customersSorted = useMemo(
-    () =>
-      [...customers].sort(
-        (a, b) => customerBalancePaise(b) - customerBalancePaise(a),
-      ),
-    [customers],
-  );
+  const customersSorted = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const filtered = needle
+      ? customers.filter(
+          (c) =>
+            c.customerName.toLowerCase().includes(needle) ||
+            (c.phone && c.phone.includes(needle)),
+        )
+      : customers;
+
+    return [...filtered].sort(
+      (a, b) => customerBalancePaise(b) - customerBalancePaise(a),
+    );
+  }, [customers, search]);
 
   const submit = async () => {
     if (!name.trim()) {
@@ -53,6 +61,22 @@ export default function UdhaarScreen() {
   return (
     <ScreenContainer contentStyle={styles.content}>
       <ScreenHeader title={t('udhaar')} subtitle={`${customers.length} customers`} />
+
+      <View style={styles.searchRow}>
+        <Feather name="search" size={16} color="#94A3B8" />
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search by name or phone"
+          placeholderTextColor="#94A3B8"
+          style={styles.searchInput}
+        />
+        {search.length > 0 && (
+          <Pressable onPress={() => setSearch('')} hitSlop={8}>
+            <Feather name="x" size={16} color="#94A3B8" />
+          </Pressable>
+        )}
+      </View>
 
       {showForm ? (
         <GlassCard style={styles.formCard}>
@@ -122,6 +146,23 @@ export default function UdhaarScreen() {
 const styles = StyleSheet.create({
   content: {
     gap: 12,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(15,23,42,0.4)',
+    paddingHorizontal: 12,
+  },
+  searchInput: {
+    flex: 1,
+    color: '#F8FAFC',
+    fontFamily: typography.body,
+    paddingVertical: 8,
   },
   formCard: {
     gap: 10,

@@ -1,12 +1,11 @@
 import type { NextFunction, Request, Response } from 'express';
-import { createSecretKey } from 'node:crypto';
+import { createHash, createSecretKey } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { env } from '../config/env';
 import { logError, logWarn } from '../observability/logger';
 import { recordAuthFailureMetric } from '../observability/metrics';
-import { claimLegacyOwnership } from '../services/ownerMigration';
 import { HttpError } from '../utils/http';
 
 const AUTH_UPSTREAM_TIMEOUT_MS = env.AUTH_UPSTREAM_TIMEOUT_MS;
@@ -53,6 +52,9 @@ const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_K
 });
 const authTokenCache = new Map<string, { expiresAt: number; claims: VerifiedTokenClaims }>();
 const inFlightTokenChecks = new Map<string, Promise<VerifiedTokenClaims | null>>();
+
+const hashToken = (token: string): string =>
+  createHash('sha256').update(token).digest('hex');
 
 const isAllowedRole = (role: unknown): boolean =>
   role === 'authenticated';
@@ -141,16 +143,17 @@ const getTokenClaimsWithRemoteJwks = async (
 };
 
 const getTokenClaims = async (token: string): Promise<VerifiedTokenClaims | null> => {
+  const cacheKey = hashToken(token);
   const now = Date.now();
-  const cached = authTokenCache.get(token);
+  const cached = authTokenCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.claims;
   }
   if (cached) {
-    authTokenCache.delete(token);
+    authTokenCache.delete(cacheKey);
   }
 
-  const inFlight = inFlightTokenChecks.get(token);
+  const inFlight = inFlightTokenChecks.get(cacheKey);
   if (inFlight) {
     return inFlight;
   }
@@ -173,7 +176,7 @@ const getTokenClaims = async (token: string): Promise<VerifiedTokenClaims | null
     }
 
     if (claims) {
-      authTokenCache.set(token, {
+      authTokenCache.set(cacheKey, {
         expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
         claims,
       });
@@ -182,10 +185,10 @@ const getTokenClaims = async (token: string): Promise<VerifiedTokenClaims | null
 
     return claims;
   })().finally(() => {
-    inFlightTokenChecks.delete(token);
+    inFlightTokenChecks.delete(cacheKey);
   });
 
-  inFlightTokenChecks.set(token, checkPromise);
+  inFlightTokenChecks.set(cacheKey, checkPromise);
   return checkPromise;
 };
 
@@ -214,13 +217,6 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
       const request = req as AuthenticatedRequest;
       request.authUserId = claims.userId;
       request.authRole = claims.role;
-
-      await claimLegacyOwnership(claims.userId).catch((error) => {
-        logError('auth.legacy_ownership_claim_failed', {
-          userId: claims.userId,
-          error: error instanceof Error ? error.message : error,
-        });
-      });
 
       next();
     } catch (error) {

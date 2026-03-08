@@ -30,10 +30,9 @@ export default function HomeDashboardScreen() {
   const receivable = totalsForCustomers(customers).receivablePaise;
   const netPosition = receivable - summary.totalOutstandingPaise;
 
-  const overdueTop = statuses
+  const overdueAll = statuses
     .filter((bill) => bill.computedStatus === 'overdue')
-    .sort((a, b) => b.remainingPaise - a.remainingPaise)
-    .slice(0, 3);
+    .sort((a, b) => b.remainingPaise - a.remainingPaise);
 
   const activities = recentPayments(bills, vendors);
 
@@ -73,25 +72,27 @@ export default function HomeDashboardScreen() {
 
       <GlassCard style={styles.section}>
         <AppText variant="subtitle">{t('overdueBills')}</AppText>
-        {overdueTop.length === 0 ? (
+        {overdueAll.length === 0 ? (
           <AppText variant="caption">No overdue bills. Great control.</AppText>
         ) : (
-          overdueTop.map((bill, index) => {
-            const vendor = resolveVendor(vendors, bill.vendorId);
-            return (
-              <Animated.View key={bill.id} entering={FadeInDown.delay(index * 80).springify()}>
-                <Pressable style={styles.overdueItem} onPress={() => router.push(`/bill/${bill.id}`)}>
-                  <View>
-                    <AppText variant="label">{vendor?.name ?? 'Unknown Vendor'}</AppText>
-                    <AppText variant="caption">{`${daysSince(bill.date)} days overdue • ${bill.billNumber}`}</AppText>
-                  </View>
-                  <AppText variant="label" style={styles.overdueAmount}>
-                    {formatINRFromPaise(bill.remainingPaise)}
-                  </AppText>
-                </Pressable>
-              </Animated.View>
-            );
-          })
+          <ScrollView style={styles.overdueScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+            {overdueAll.map((bill, index) => {
+              const vendor = resolveVendor(vendors, bill.vendorId);
+              return (
+                <Animated.View key={bill.id} entering={FadeInDown.delay(index * 80).springify()}>
+                  <Pressable style={styles.overdueItem} onPress={() => router.push(`/bill/${bill.id}`)}>
+                    <View>
+                      <AppText variant="label">{vendor?.name ?? 'Unknown Vendor'}</AppText>
+                      <AppText variant="caption">{`${daysSince(bill.date)} days overdue • ${bill.billNumber}`}</AppText>
+                    </View>
+                    <AppText variant="label" style={styles.overdueAmount}>
+                      {formatINRFromPaise(bill.remainingPaise)}
+                    </AppText>
+                  </Pressable>
+                </Animated.View>
+              );
+            })}
+          </ScrollView>
         )}
       </GlassCard>
 
@@ -100,17 +101,19 @@ export default function HomeDashboardScreen() {
         {activities.length === 0 ? (
           <AppText variant="caption">No payments logged yet.</AppText>
         ) : (
-          activities.map((payment, index) => (
-            <Animated.View key={payment.id} entering={FadeInDown.delay(index * 60).springify()}>
-              <View style={styles.activityRow}>
-                <View style={styles.activityCopy}>
-                  <AppText variant="label">{payment.vendorName}</AppText>
-                  <AppText variant="caption">{`${payment.billNumber} • ${formatDisplayDate(payment.date)}`}</AppText>
+          <ScrollView style={styles.activityScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+            {activities.map((payment, index) => (
+              <Animated.View key={payment.id} entering={FadeInDown.delay(index * 60).springify()}>
+                <View style={styles.activityRow}>
+                  <View style={styles.activityCopy}>
+                    <AppText variant="label">{payment.vendorName}</AppText>
+                    <AppText variant="caption">{`${payment.billNumber} • ${formatDisplayDate(payment.date)}`}</AppText>
+                  </View>
+                  <AppText variant="label">{formatINRFromPaise(payment.amountPaise)}</AppText>
                 </View>
-                <AppText variant="label">{formatINRFromPaise(payment.amountPaise)}</AppText>
-              </View>
-            </Animated.View>
-          ))
+              </Animated.View>
+            ))}
+          </ScrollView>
         )}
       </GlassCard>
 
@@ -146,6 +149,12 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: 10,
+  },
+  overdueScroll: {
+    maxHeight: 204,
+  },
+  activityScroll: {
+    maxHeight: 264,
   },
   overdueItem: {
     minHeight: 52,

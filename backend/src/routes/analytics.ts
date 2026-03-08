@@ -11,15 +11,15 @@ analyticsRouter.get(
   '/summary',
   asyncHandler(async (req, res) => {
     const ownerUserId = getAuthUserId(req);
-    const outstanding = await dbQuery<{ outstanding_paise: number }>(
+    const outstanding = await dbQuery<{ outstanding_paise: string }>(
       `
         select coalesce(
           sum(greatest(b.total_amount_paise - coalesce(p.paid_paise, 0), 0)),
           0
-        )::int as outstanding_paise
+        )::bigint as outstanding_paise
         from bills b
         left join (
-          select bill_id, coalesce(sum(amount_paise), 0)::int as paid_paise
+          select bill_id, coalesce(sum(amount_paise), 0)::bigint as paid_paise
           from payments
           where deleted_at is null
           group by bill_id
@@ -30,9 +30,9 @@ analyticsRouter.get(
       [ownerUserId],
     );
 
-    const outstandingPaise = outstanding.rows[0]?.outstanding_paise ?? 0;
+    const outstandingPaise = Number(outstanding.rows[0]?.outstanding_paise ?? 0);
 
-    const receivable = await dbQuery<{ receivable_paise: number }>(
+    const receivable = await dbQuery<{ receivable_paise: string }>(
       `
         select coalesce(
           sum(
@@ -43,7 +43,7 @@ analyticsRouter.get(
             end
           ),
           0
-        )::int as receivable_paise
+        )::bigint as receivable_paise
         from udhaar_entries ue
         join udhaar_customers uc on uc.id = ue.customer_id
         where uc.owner_user_id = $1
@@ -52,7 +52,7 @@ analyticsRouter.get(
       [ownerUserId],
     );
 
-    const receivablePaise = receivable.rows[0]?.receivable_paise ?? 0;
+    const receivablePaise = Number(receivable.rows[0]?.receivable_paise ?? 0);
 
     sendOk(res, {
       outstandingPaise,
@@ -69,7 +69,7 @@ analyticsRouter.get(
     const grouped = await dbQuery<{
       vendor_id: string;
       vendor_name: string | null;
-      outstanding_paise: number;
+      outstanding_paise: string;
     }>(
       `
         select
@@ -78,11 +78,11 @@ analyticsRouter.get(
           coalesce(
             sum(greatest(b.total_amount_paise - coalesce(p.paid_paise, 0), 0)),
             0
-          )::int as outstanding_paise
+          )::bigint as outstanding_paise
         from vendors v
         left join bills b on b.vendor_id = v.id and b.deleted_at is null
         left join (
-          select bill_id, coalesce(sum(amount_paise), 0)::int as paid_paise
+          select bill_id, coalesce(sum(amount_paise), 0)::bigint as paid_paise
           from payments
           where deleted_at is null
           group by bill_id
@@ -98,7 +98,7 @@ analyticsRouter.get(
       .map((row) => ({
         vendorId: row.vendor_id,
         vendorName: row.vendor_name ?? 'Unknown',
-        outstandingPaise: row.outstanding_paise,
+        outstandingPaise: Number(row.outstanding_paise),
       }))
       .sort((a, b) => b.outstandingPaise - a.outstandingPaise);
 
@@ -113,13 +113,13 @@ analyticsRouter.get(
     const monthly = await dbQuery<{
       year: number;
       month: number;
-      total_paid_paise: number;
+      total_paid_paise: string;
     }>(
       `
         select
           extract(year from p.date)::int as year,
           extract(month from p.date)::int as month,
-          coalesce(sum(p.amount_paise), 0)::int as total_paid_paise
+          coalesce(sum(p.amount_paise), 0)::bigint as total_paid_paise
         from payments p
         join bills b on b.id = p.bill_id
         where b.owner_user_id = $1
@@ -133,7 +133,7 @@ analyticsRouter.get(
 
     const data = monthly.rows.slice(-6).map((item) => ({
       month: `${item.year}-${String(item.month).padStart(2, '0')}`,
-      totalPaidPaise: item.total_paid_paise,
+      totalPaidPaise: Number(item.total_paid_paise),
     }));
 
     sendOk(res, data);

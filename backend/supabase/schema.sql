@@ -29,7 +29,7 @@ create table if not exists public.bills (
 
 create table if not exists public.bill_line_items (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
-  bill_id text not null references public.bills(id) on delete cascade,
+  bill_id text not null references public.bills(id) on delete restrict,
   name text not null,
   qty double precision not null check (qty > 0),
   rate_paise integer not null check (rate_paise >= 0),
@@ -39,7 +39,7 @@ create table if not exists public.bill_line_items (
 
 create table if not exists public.payments (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
-  bill_id text not null references public.bills(id) on delete cascade,
+  bill_id text not null references public.bills(id) on delete restrict,
   amount_paise integer not null check (amount_paise > 0),
   date timestamptz not null default now(),
   collector_name text,
@@ -53,7 +53,7 @@ create table if not exists public.payments (
 
 create table if not exists public.payment_edit_logs (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
-  payment_id text not null references public.payments(id) on delete cascade,
+  payment_id text not null references public.payments(id) on delete restrict,
   edited_at timestamptz not null,
   previous_amount_paise integer not null,
   previous_date timestamptz not null
@@ -79,7 +79,7 @@ create table if not exists public.udhaar_customers (
 
 create table if not exists public.udhaar_entries (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
-  customer_id text not null references public.udhaar_customers(id) on delete cascade,
+  customer_id text not null references public.udhaar_customers(id) on delete restrict,
   type text not null check (type in ('credit', 'repayment')),
   amount_paise integer not null check (amount_paise > 0),
   description text,

@@ -73,6 +73,12 @@ export default function BillsScreen() {
         />
       </View>
 
+      <GradientButton
+        label={t('scanNewBill')}
+        onPress={() => router.push('/scan')}
+        icon={<Feather name="camera" size={16} color="#0B1120" />}
+      />
+
       <View style={styles.tabsWrap}>
         {filterTabs.map((tab) => {
           const active = tab.key === activeTab;
@@ -113,12 +119,6 @@ export default function BillsScreen() {
           );
         })
       )}
-
-      <GradientButton
-        label={t('scanNewBill')}
-        onPress={() => router.push('/scan')}
-        icon={<Feather name="camera" size={16} color="#0B1120" />}
-      />
     </ScreenContainer>
   );
 }

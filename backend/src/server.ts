@@ -25,6 +25,13 @@ import { errorMiddleware } from './utils/http';
 const app = express();
 app.set('trust proxy', env.TRUST_PROXY);
 
+if (env.NODE_ENV === 'production' && env.CORS_ORIGIN === '*') {
+  throw new Error(
+    'CORS_ORIGIN must be explicitly set in production (not wildcard). ' +
+      'Example: CORS_ORIGIN=https://app.example.com',
+  );
+}
+
 const corsOriginConfig =
   env.CORS_ORIGIN === '*'
     ? true
@@ -91,7 +98,8 @@ app.use(
 );
 app.use(helmet());
 app.use(compression());
-app.use(express.json({ limit: '2mb' }));
+app.use('/api/parse', express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '100kb' }));
 app.use(authMiddleware);
 
 app.use(
@@ -123,7 +131,7 @@ app.get('/metrics', (req, res) => {
 
   if (env.NODE_ENV === 'production') {
     const providedToken = req.header('x-metrics-token');
-    if (env.METRICS_TOKEN && providedToken !== env.METRICS_TOKEN) {
+    if (!env.METRICS_TOKEN || providedToken !== env.METRICS_TOKEN) {
       res.status(404).json({
         success: false,
         message: 'Not found',
@@ -136,7 +144,7 @@ app.get('/metrics', (req, res) => {
   res.status(200).send(renderPrometheusMetrics());
 });
 
-app.get('/health/detailed', (_req, res) => {
+app.get('/health/detailed', async (_req, res) => {
   if (env.NODE_ENV === 'production') {
     const providedToken = _req.header('x-health-token');
     if (!env.HEALTH_DETAILS_TOKEN || providedToken !== env.HEALTH_DETAILS_TOKEN) {
@@ -148,12 +156,22 @@ app.get('/health/detailed', (_req, res) => {
     }
   }
 
+  let dbProbeOk = false;
+  try {
+    const { dbQuery } = await import('./db/postgres');
+    await dbQuery('select 1');
+    dbProbeOk = true;
+  } catch {
+    dbProbeOk = false;
+  }
+
   res.status(200).json({
     success: true,
     service: 'kiranatrack-backend',
     release: env.RELEASE_VERSION,
     timestamp: new Date().toISOString(),
     dbState: getDatabaseState(),
+    dbProbeOk,
   });
 });
 

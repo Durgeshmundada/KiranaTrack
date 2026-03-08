@@ -177,11 +177,34 @@ const fetchWithTimeout = async (
 const wait = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+// Lightweight circuit breaker to avoid flooding Groq when it is down
+const circuitBreaker = {
+  failures: 0,
+  lastFailure: 0,
+  threshold: 5,
+  cooldownMs: 60_000,
+  isOpen(): boolean {
+    if (this.failures < this.threshold) return false;
+    return Date.now() - this.lastFailure < this.cooldownMs;
+  },
+  recordFailure(): void {
+    this.failures += 1;
+    this.lastFailure = Date.now();
+  },
+  recordSuccess(): void {
+    this.failures = 0;
+  },
+};
+
 const requestGroqWithRetry = async (params: {
   model: string;
   maxTokens: number;
   messages: GroqMessage[];
 }): Promise<ParsedBillDraft | null> => {
+  if (circuitBreaker.isOpen()) {
+    return null;
+  }
+
   for (let attempt = 1; attempt <= parserMaxAttempts; attempt += 1) {
     try {
       const response = await fetchWithTimeout(
@@ -204,6 +227,7 @@ const requestGroqWithRetry = async (params: {
 
       const parsed = await parseGroqResponse(response);
       if (parsed) {
+        circuitBreaker.recordSuccess();
         return parsed;
       }
 
@@ -211,10 +235,12 @@ const requestGroqWithRetry = async (params: {
         attempt < parserMaxAttempts &&
         (response.ok || retryableStatusCodes.has(response.status));
       if (!shouldRetry) {
+        circuitBreaker.recordFailure();
         return null;
       }
     } catch {
       if (attempt >= parserMaxAttempts) {
+        circuitBreaker.recordFailure();
         return null;
       }
     }

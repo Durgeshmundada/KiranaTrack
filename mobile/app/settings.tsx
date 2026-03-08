@@ -1,7 +1,8 @@
 ﻿import * as FileSystem from 'expo-file-system/legacy';
+import * as Print from 'expo-print';
 import { router } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -14,7 +15,9 @@ import { t } from '@/i18n';
 import { useAppStore } from '@/store/appStore';
 import { useAuthStore } from '@/store/authStore';
 import { radii, typography } from '@/theme/tokens';
-import type { AppLanguage, PaymentMode } from '@/types/models';
+import type { AppLanguage, Bill, PaymentMode, UdhaarCustomer, Vendor } from '@/types/models';
+import { customerBalancePaise } from '@/store/selectors';
+import { formatINRFromPaise } from '@/utils/currency';
 import { resolveUserErrorMessage } from '@/utils/errors';
 import { hasPin, savePin } from '@/utils/pin';
 
@@ -35,15 +38,87 @@ export default function SettingsScreen() {
   const [healthMessage, setHealthMessage] = useState('Not checked yet');
   const [syncing, setSyncing] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [exportMonth, setExportMonth] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+
+  const exportMonthLabel = useMemo(() => {
+    const d = new Date(exportMonth.year, exportMonth.month);
+    return d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  }, [exportMonth]);
+
+  const shiftMonth = (dir: -1 | 1) => {
+    setExportMonth((prev) => {
+      let m = prev.month + dir;
+      let y = prev.year;
+      if (m < 0) { m = 11; y -= 1; }
+      if (m > 11) { m = 0; y += 1; }
+      return { year: y, month: m };
+    });
+  };
 
   const backupNow = async () => {
+    const ownerUserId = state.ownerUserId;
+    if (!ownerUserId) {
+      Alert.alert('Backup error', 'You must be signed in to create a backup.');
+      return;
+    }
+
+    const readableBill = (bill: Bill) => ({
+      billNumber: bill.billNumber,
+      vendorId: bill.vendorId,
+      date: new Date(bill.date).toLocaleDateString('en-IN'),
+      totalAmount: formatINRFromPaise(bill.totalAmountPaise),
+      totalAmountPaise: bill.totalAmountPaise,
+      imageUrl: bill.imageUrl,
+      lineItems: bill.lineItems.map((li) => ({
+        name: li.name,
+        qty: li.qty,
+        rate: formatINRFromPaise(li.ratePaise),
+        amount: formatINRFromPaise(li.amountPaise),
+        ratePaise: li.ratePaise,
+        amountPaise: li.amountPaise,
+      })),
+      payments: bill.payments.map((p) => ({
+        amount: formatINRFromPaise(p.amountPaise),
+        amountPaise: p.amountPaise,
+        date: new Date(p.date).toLocaleDateString('en-IN'),
+        mode: p.mode,
+        collectorName: p.collectorName,
+        notes: p.notes,
+      })),
+    });
+
+    const readableCustomer = (c: UdhaarCustomer) => ({
+      customerName: c.customerName,
+      phone: c.phone,
+      entries: c.entries.map((e) => ({
+        type: e.type,
+        amount: formatINRFromPaise(e.amountPaise),
+        amountPaise: e.amountPaise,
+        description: e.description,
+        date: new Date(e.date).toLocaleDateString('en-IN'),
+      })),
+    });
+
     const payload = {
+      _format: 'KiranaTrack Backup v1',
+      ownerUserId,
       exportedAt: new Date().toISOString(),
+      exportedAtReadable: new Date().toLocaleString('en-IN'),
       settings: state.settings,
-      vendors: state.vendors,
-      bills: state.bills,
-      outOfStockItems: state.outOfStockItems,
-      customers: state.customers,
+      vendors: state.vendors.map((v: Vendor) => ({
+        name: v.name,
+        phone: v.phone,
+        gstNumber: v.gstNumber,
+      })),
+      bills: state.bills.map(readableBill),
+      outOfStockItems: state.outOfStockItems.map((item) => ({
+        itemName: item.itemName,
+        status: item.status,
+      })),
+      customers: state.customers.map(readableCustomer),
     };
 
     const fileUri = `${FileSystem.documentDirectory}kiranatrack_backup_${new Date()
@@ -58,6 +133,36 @@ export default function SettingsScreen() {
     }
 
     Alert.alert('Backup created', `File saved at: ${fileUri}`);
+  };
+
+  const restoreBackup = async () => {
+    const ownerUserId = state.ownerUserId;
+    if (!ownerUserId) {
+      Alert.alert('Restore error', 'You must be signed in to restore a backup.');
+      return;
+    }
+
+    Alert.alert(
+      'Restore Data',
+      'Your data is stored securely on the server. Tap "Sync Now" to pull the latest data. The backup file is for your personal records.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sync Now',
+          onPress: async () => {
+            try {
+              await state.syncAll();
+              Alert.alert('Sync complete', 'Latest data pulled from backend.');
+            } catch (error) {
+              Alert.alert(
+                'Sync failed',
+                resolveUserErrorMessage(error, 'Could not refresh data right now.'),
+              );
+            }
+          },
+        },
+      ],
+    );
   };
 
   const savePinFlow = async () => {
@@ -151,6 +256,148 @@ export default function SettingsScreen() {
         : healthState === 'checking'
           ? '#fde68a'
           : '#cbd5e1';
+
+  const exportMonthlyReport = async () => {
+    const bills = state.bills;
+    const vendors = state.vendors;
+    const customers = state.customers;
+
+    const year = exportMonth.year;
+    const month = exportMonth.month;
+    const monthName = exportMonthLabel;
+
+    // -- Bills for the month --
+    const monthBills = bills.filter((b: Bill) => {
+      const d = new Date(b.date);
+      return d.getFullYear() === year && d.getMonth() === month;
+    });
+
+    const vendorMap = new Map(vendors.map((v: Vendor) => [v.id, v.name]));
+
+    const totalBilled = monthBills.reduce((s: number, b: Bill) => s + b.totalAmountPaise, 0);
+    const totalPaid = monthBills.reduce(
+      (s: number, b: Bill) => s + b.payments.reduce((ps: number, p) => ps + p.amountPaise, 0),
+      0,
+    );
+
+    const billRows = monthBills
+      .sort((a: Bill, b: Bill) => a.date.localeCompare(b.date))
+      .map(
+        (b: Bill) =>
+          `<tr>
+            <td>${new Date(b.date).toLocaleDateString('en-IN')}</td>
+            <td>${b.billNumber}</td>
+            <td>${vendorMap.get(b.vendorId) ?? 'Unknown'}</td>
+            <td style="text-align:right">${formatINRFromPaise(b.totalAmountPaise)}</td>
+            <td style="text-align:right">${formatINRFromPaise(b.payments.reduce((s: number, p) => s + p.amountPaise, 0))}</td>
+          </tr>`,
+      )
+      .join('\n');
+
+    // -- Udhaar (credit) for the month --
+    const udhaarRows: string[] = [];
+    let totalCredit = 0;
+    let totalRepayment = 0;
+
+    customers.forEach((c: UdhaarCustomer) => {
+      const monthEntries = c.entries.filter((e) => {
+        const d = new Date(e.date);
+        return d.getFullYear() === year && d.getMonth() === month;
+      });
+      if (monthEntries.length === 0) return;
+
+      const credit = monthEntries
+        .filter((e) => e.type === 'credit')
+        .reduce((s, e) => s + e.amountPaise, 0);
+      const repayment = monthEntries
+        .filter((e) => e.type === 'repayment')
+        .reduce((s, e) => s + e.amountPaise, 0);
+      const overallBalance = customerBalancePaise(c);
+
+      totalCredit += credit;
+      totalRepayment += repayment;
+
+      monthEntries
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .forEach((e) => {
+          udhaarRows.push(
+            `<tr>
+              <td>${new Date(e.date).toLocaleDateString('en-IN')}</td>
+              <td>${c.customerName}</td>
+              <td>${c.phone ?? '-'}</td>
+              <td>${e.type === 'credit' ? 'Credit' : 'Repayment'}</td>
+              <td style="text-align:right">${formatINRFromPaise(e.amountPaise)}</td>
+              <td>${e.description ?? '-'}</td>
+            </tr>`,
+          );
+        });
+
+      udhaarRows.push(
+        `<tr style="background:#f8fafc;font-weight:600">
+          <td colspan="3">${c.customerName} — Month subtotal</td>
+          <td>Cr: ${formatINRFromPaise(credit)} | Rp: ${formatINRFromPaise(repayment)}</td>
+          <td style="text-align:right">Overall bal: ${formatINRFromPaise(overallBalance)}</td>
+          <td></td>
+        </tr>`,
+      );
+    });
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KiranaTrack - ${monthName}</title>
+<style>
+  body{font-family:system-ui,sans-serif;padding:16px;color:#1e293b;max-width:900px;margin:0 auto}
+  h1{font-size:20px;margin-bottom:4px}
+  h2{font-size:15px;color:#475569;font-weight:normal;margin-top:0}
+  h3{font-size:16px;margin-top:28px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;padding-bottom:4px}
+  .summary{display:flex;gap:12px;margin:16px 0;flex-wrap:wrap}
+  .card{background:#f1f5f9;border-radius:8px;padding:12px 16px;flex:1;min-width:120px}
+  .card .label{font-size:11px;color:#64748b;text-transform:uppercase}
+  .card .value{font-size:18px;font-weight:700;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+  th{background:#f8fafc;text-align:left;padding:8px;border-bottom:2px solid #e2e8f0;font-size:11px;text-transform:uppercase;color:#64748b}
+  td{padding:8px;border-bottom:1px solid #f1f5f9}
+  .footer{margin-top:24px;font-size:11px;color:#94a3b8;text-align:center}
+</style></head><body>
+<h1>Monthly Report - ${monthName}</h1>
+<h2>KiranaTrack</h2>
+
+<h3>Bills</h3>
+<div class="summary">
+  <div class="card"><div class="label">Bills</div><div class="value">${monthBills.length}</div></div>
+  <div class="card"><div class="label">Total Billed</div><div class="value">${formatINRFromPaise(totalBilled)}</div></div>
+  <div class="card"><div class="label">Total Paid</div><div class="value">${formatINRFromPaise(totalPaid)}</div></div>
+  <div class="card"><div class="label">Outstanding</div><div class="value">${formatINRFromPaise(totalBilled - totalPaid)}</div></div>
+</div>
+<table>
+  <thead><tr><th>Date</th><th>Bill #</th><th>Vendor</th><th style="text-align:right">Amount</th><th style="text-align:right">Paid</th></tr></thead>
+  <tbody>${billRows || '<tr><td colspan="5" style="text-align:center;color:#94a3b8">No bills this month</td></tr>'}</tbody>
+</table>
+
+<h3>Udhaar (Credit)</h3>
+<div class="summary">
+  <div class="card"><div class="label">Credit Given</div><div class="value">${formatINRFromPaise(totalCredit)}</div></div>
+  <div class="card"><div class="label">Repayments</div><div class="value">${formatINRFromPaise(totalRepayment)}</div></div>
+  <div class="card"><div class="label">Net This Month</div><div class="value">${formatINRFromPaise(totalCredit - totalRepayment)}</div></div>
+</div>
+<table>
+  <thead><tr><th>Date</th><th>Customer</th><th>Phone</th><th>Type</th><th style="text-align:right">Amount</th><th>Description</th></tr></thead>
+  <tbody>${udhaarRows.join('\n') || '<tr><td colspan="6" style="text-align:center;color:#94a3b8">No udhaar entries this month</td></tr>'}</tbody>
+</table>
+
+<div class="footer">Generated on ${new Date().toLocaleString('en-IN')}</div>
+</body></html>`;
+
+    const { uri } = await Print.printToFileAsync({ html });
+    const pdfUri = `${FileSystem.documentDirectory}kiranatrack_${year}_${String(month + 1).padStart(2, '0')}_report.pdf`;
+    await FileSystem.moveAsync({ from: uri, to: pdfUri });
+
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(pdfUri, { mimeType: 'application/pdf' });
+      return;
+    }
+    Alert.alert('Report created', `PDF saved at: ${pdfUri}`);
+  };
 
   return (
     <ScreenContainer contentStyle={styles.content}>
@@ -292,16 +539,17 @@ export default function SettingsScreen() {
       <GlassCard style={styles.section}>
         <AppText variant="subtitle">Backup & Export</AppText>
         <GradientButton label={t('backupNow')} onPress={backupNow} />
-        <Pressable
-          style={styles.infoBtn}
-          onPress={() => Alert.alert('Restore Backup', 'Use this backup JSON later via import flow in the next release.')}>
-          <AppText variant="caption">{t('restoreBackup')}</AppText>
-        </Pressable>
-        <Pressable
-          style={styles.infoBtn}
-          onPress={() => Alert.alert('PDF Export', 'Monthly PDF export pipeline is scaffolded for next phase.')}>
-          <AppText variant="caption">{t('exportMonthlyPdf')}</AppText>
-        </Pressable>
+        <GradientButton label={t('restoreBackup')} onPress={restoreBackup} variant="accent" />
+        <View style={styles.monthPicker}>
+          <Pressable onPress={() => shiftMonth(-1)} style={styles.monthArrow}>
+            <AppText variant="label" style={styles.monthArrowText}>{`◀`}</AppText>
+          </Pressable>
+          <AppText variant="label" style={styles.monthLabel}>{exportMonthLabel}</AppText>
+          <Pressable onPress={() => shiftMonth(1)} style={styles.monthArrow}>
+            <AppText variant="label" style={styles.monthArrowText}>{`▶`}</AppText>
+          </Pressable>
+        </View>
+        <GradientButton label={t('exportMonthlyPdf')} onPress={exportMonthlyReport} />
       </GlassCard>
     </ScreenContainer>
   );
@@ -375,5 +623,30 @@ const styles = StyleSheet.create({
   },
   syncStamp: {
     color: '#93C5FD',
+  },
+  monthPicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    paddingVertical: 4,
+  },
+  monthArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthArrowText: {
+    color: '#FDBA74',
+    fontSize: 16,
+  },
+  monthLabel: {
+    color: '#F8FAFC',
+    fontSize: 15,
+    minWidth: 140,
+    textAlign: 'center',
   },
 });

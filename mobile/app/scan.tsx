@@ -191,17 +191,21 @@ export default function ScanBillScreen() {
 
       <GlassCard intense style={styles.captureCard}>
         <View style={styles.captureActions}>
-          <GradientButton
-            label="Capture"
-            onPress={captureFromCamera}
-            icon={<Feather name="camera" size={16} color="#0B1120" />}
-          />
-          <GradientButton
-            label="Upload"
-            onPress={pickFromGallery}
-            variant="accent"
-            icon={<Feather name="image" size={16} color="#0B1120" />}
-          />
+          <View style={styles.halfBtn}>
+            <GradientButton
+              label="Camera"
+              onPress={captureFromCamera}
+              icon={<Feather name="camera" size={16} color="#0B1120" />}
+            />
+          </View>
+          <View style={styles.halfBtn}>
+            <GradientButton
+              label="Gallery"
+              onPress={pickFromGallery}
+              variant="accent"
+              icon={<Feather name="image" size={16} color="#0B1120" />}
+            />
+          </View>
         </View>
 
         {imageUri ? (
@@ -312,6 +316,9 @@ const styles = StyleSheet.create({
   captureActions: {
     flexDirection: 'row',
     gap: 10,
+  },
+  halfBtn: {
+    flex: 1,
   },
   preview: {
     width: '100%',

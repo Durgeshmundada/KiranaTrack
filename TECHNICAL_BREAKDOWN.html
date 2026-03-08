@@ -1,0 +1,1397 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KiranaTrack Technical Breakdown</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;700;800&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-0: #040e19;
+      --bg-1: #0b1f34;
+      --bg-2: #113a5a;
+      --surface: rgba(8, 24, 38, 0.78);
+      --surface-strong: rgba(5, 17, 30, 0.9);
+      --line: rgba(148, 163, 184, 0.24);
+      --text: #e6f1fb;
+      --muted: #9fb6cc;
+      --brand: #f59e0b;
+      --brand-soft: #fbbf24;
+      --accent: #22d3ee;
+      --danger: #f87171;
+      --radius: 22px;
+      --shadow: 0 24px 60px rgba(2, 8, 18, 0.45);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      line-height: 1.66;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1f5d84 0%, transparent 65%),
+        radial-gradient(900px 500px at 95% 8%, #14516b 0%, transparent 62%),
+        linear-gradient(145deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
+      overflow-x: hidden;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      z-index: -1;
+      border-radius: 999px;
+      filter: blur(14px);
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    body::before {
+      width: 320px;
+      height: 320px;
+      left: -90px;
+      top: 25%;
+      background: radial-gradient(circle, #f59e0b 0%, rgba(245, 158, 11, 0) 70%);
+      animation: drift-a 11s ease-in-out infinite alternate;
+    }
+
+    body::after {
+      width: 360px;
+      height: 360px;
+      right: -110px;
+      top: 6%;
+      background: radial-gradient(circle, #22d3ee 0%, rgba(34, 211, 238, 0) 70%);
+      animation: drift-b 13s ease-in-out infinite alternate;
+    }
+
+    @keyframes drift-a {
+      from { transform: translateY(-18px) translateX(0px); }
+      to { transform: translateY(22px) translateX(24px); }
+    }
+
+    @keyframes drift-b {
+      from { transform: translateY(0px) translateX(0px); }
+      to { transform: translateY(24px) translateX(-18px); }
+    }
+
+    .doc-shell {
+      padding: clamp(14px, 2.4vw, 34px);
+    }
+
+    .doc {
+      max-width: min(1080px, calc(100vw - 24px));
+      margin: 0 auto;
+      padding: clamp(18px, 3vw, 44px);
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+        var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(8px);
+    }
+
+    .doc > :is(h1, h2, h3, p, ul, ol, hr, pre, table, blockquote) {
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 940px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-family: "Sora", "Segoe UI", sans-serif;
+      letter-spacing: 0.01em;
+    }
+
+    h1 {
+      margin: 0 0 0.5rem;
+      font-size: clamp(2rem, 5vw, 3.35rem);
+      line-height: 1.08;
+      font-weight: 800;
+      background: linear-gradient(95deg, #f8fbff 8%, #fde68a 52%, #67e8f9 98%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      text-wrap: balance;
+    }
+
+    h1 + p {
+      margin-top: 0;
+      color: #c8ddf1;
+      display: inline-flex;
+      padding: 0.35rem 0.72rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 999px;
+      background: rgba(5, 18, 29, 0.62);
+      font-weight: 600;
+    }
+
+    h2 {
+      margin-top: 2.6rem;
+      margin-bottom: 0.95rem;
+      font-size: clamp(1.06rem, 2vw, 1.4rem);
+      line-height: 1.25;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #f8fafc;
+      border-left: 4px solid var(--brand);
+      padding: 0.7rem 0.95rem 0.68rem;
+      border-radius: 0.7rem;
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.04));
+      box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.16);
+      scroll-margin-top: 20px;
+    }
+
+    h3 {
+      margin-top: 1.55rem;
+      margin-bottom: 0.55rem;
+      font-size: clamp(1rem, 1.6vw, 1.17rem);
+      line-height: 1.34;
+      color: #f4faff;
+      font-weight: 700;
+    }
+
+    p {
+      margin-top: 0.45rem;
+      margin-bottom: 0.95rem;
+      color: var(--text);
+      font-size: 1.04rem;
+    }
+
+    ul,
+    ol {
+      margin-top: 0.46rem;
+      margin-bottom: 1rem;
+      padding-left: 1.22rem;
+    }
+
+    li {
+      margin: 0.28rem 0;
+      color: #dce9f6;
+    }
+
+    li::marker {
+      color: #fbbf24;
+    }
+
+    hr {
+      margin: 1.8rem auto;
+      border: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.48), transparent);
+    }
+
+    code {
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 0.9em;
+      color: #fde68a;
+      background: rgba(148, 163, 184, 0.16);
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 0.45rem;
+      padding: 0.12rem 0.38rem;
+      word-break: break-word;
+    }
+
+    pre {
+      margin: 1rem auto 1.3rem;
+      padding: 1rem 1.08rem;
+      border-radius: 0.85rem;
+      background: var(--surface-strong);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      overflow: auto;
+      box-shadow: 0 14px 30px rgba(3, 9, 17, 0.42);
+    }
+
+    pre code {
+      border: 0;
+      background: transparent;
+      color: #d8e9fb;
+      padding: 0;
+      white-space: pre;
+    }
+
+    blockquote {
+      margin: 1rem auto 1.2rem;
+      padding: 0.8rem 1rem;
+      border-left: 4px solid var(--accent);
+      border-radius: 0.7rem;
+      background: rgba(34, 211, 238, 0.08);
+      color: #d2ecfa;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      border-radius: 0.8rem;
+      overflow: hidden;
+      margin: 1.1rem auto 1.3rem;
+      background: rgba(8, 24, 38, 0.52);
+    }
+
+    th,
+    td {
+      padding: 0.58rem 0.68rem;
+      text-align: left;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    th {
+      background: rgba(34, 211, 238, 0.16);
+      color: #eff9ff;
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    a {
+      color: #67e8f9;
+      text-underline-offset: 2px;
+      text-decoration-thickness: 1px;
+    }
+
+    a:hover {
+      color: #a5f3fc;
+    }
+
+    @media (max-width: 900px) {
+      .doc-shell {
+        padding: 10px;
+      }
+
+      .doc {
+        border-radius: 16px;
+        padding: 14px;
+      }
+
+      h2 {
+        margin-top: 2rem;
+      }
+    }
+
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+
+    @media print {
+      html,
+      body,
+      * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      body {
+        min-height: auto;
+        color: var(--text);
+        background:
+          radial-gradient(1100px 560px at 8% -12%, #1f5d84 0%, transparent 66%),
+          radial-gradient(860px 500px at 96% 8%, #14516b 0%, transparent 64%),
+          linear-gradient(145deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2)) !important;
+      }
+
+      body::before,
+      body::after {
+        display: none !important;
+      }
+
+      .doc-shell {
+        padding: 0;
+      }
+
+      .doc {
+        max-width: 100%;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+          var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        box-shadow: none;
+        backdrop-filter: none;
+        padding: 10mm;
+      }
+
+      h1 {
+        color: #f8fafc;
+        background: none;
+        -webkit-text-fill-color: #f8fafc;
+      }
+
+      h1 + p {
+        border-color: rgba(148, 163, 184, 0.35);
+        color: #c8ddf1;
+        background: rgba(5, 18, 29, 0.62);
+      }
+
+      h2 {
+        color: #f8fafc;
+        border-left-color: var(--brand);
+        background: linear-gradient(90deg, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.04));
+        box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.16);
+      }
+
+      h3,
+      p,
+      li {
+        color: var(--text);
+      }
+
+      code {
+        color: #fde68a;
+        background: rgba(148, 163, 184, 0.16);
+        border-color: rgba(148, 163, 184, 0.24);
+      }
+
+      pre {
+        background: var(--surface-strong);
+        border-color: rgba(148, 163, 184, 0.28);
+        box-shadow: none;
+      }
+
+      pre code {
+        color: #d8e9fb;
+      }
+
+      blockquote {
+        background: rgba(34, 211, 238, 0.08);
+        border-left-color: var(--accent);
+        color: #d2ecfa;
+      }
+
+      table {
+        background: rgba(8, 24, 38, 0.52);
+        border-color: rgba(148, 163, 184, 0.26);
+      }
+
+      th {
+        background: rgba(34, 211, 238, 0.16);
+        color: #eff9ff;
+      }
+
+      td {
+        border-bottom-color: rgba(148, 163, 184, 0.2);
+      }
+
+      hr {
+        background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.48), transparent);
+      }
+
+      a {
+        color: #67e8f9;
+      }
+
+      h2,
+      h3 {
+        break-after: avoid-page;
+        page-break-after: avoid;
+      }
+
+      pre,
+      blockquote,
+      table {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="doc-shell">
+    <article class="doc"><h1>KiranaTrack - Complete Technical Breakdown</h1>
+<p>Generated on: 2026-03-03</p>
+<h2>Scope and Method</h2>
+<ul>
+<li>I recursively inspected project files in <code>d:\kirana-bill</code>.</li>
+<li>I analyzed all tracked source/config/docs files plus important local untracked artifacts (<code>mobile/.env</code>, <code>mobile/credentials.json</code>, <code>mobile/keystore/*.jks</code>, <code>.runlogs</code>, root <code>.vscode</code>).</li>
+<li>I intentionally did not reverse engineer third-party dependency trees (<code>mobile/node_modules</code>, <code>backend/node_modules</code>) or generated build mirrors (<code>backend/dist</code>) line-by-line because they are external/generated, not authored project logic.</li>
+<li>Validation run results:<ul>
+<li><code>npm run test</code>: passed (mobile + backend).</li>
+<li><code>npm run typecheck</code>: passed (mobile + backend).</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h2>PROJECT OVERVIEW</h2>
+<h3>What problem this project solves</h3>
+<p>KiranaTrack solves daily operational cash-flow tracking for small retail shops:</p>
+<ul>
+<li>Supplier bill capture and payment tracking.</li>
+<li>Out-of-stock notepad.</li>
+<li>Udhaar (customer credit/repayment) ledger.</li>
+<li>Basic analytics for outstanding and anomalies.</li>
+<li>Mobile-first workflow with backend persistence and auth.</li>
+</ul>
+<h3>Architecture type</h3>
+<ul>
+<li>Overall: modular monolith (single backend service + single mobile app).</li>
+<li>Backend style: layered (<code>routes -&gt; services/utils -&gt; db</code>).</li>
+<li>Frontend style: feature-oriented Expo Router app with global Zustand stores.</li>
+<li>Deployment style: one Node service (Render), one mobile artifact (EAS builds).</li>
+</ul>
+<h3>Is it scalable?</h3>
+<p>Partially.</p>
+<ul>
+<li>Scales reasonably for low-medium traffic with Postgres + indexed queries + idempotency keys.</li>
+<li>Not horizontally strong for parser/metrics/rate-limit state because several controls are in-memory (per process).</li>
+<li>Parser queue is in-memory; jobs are lost on restart and not shared between instances.</li>
+</ul>
+<h3>Major architecture weaknesses</h3>
+<ul>
+<li>Security hygiene issue: plaintext Android keystore passwords in local <code>mobile/credentials.json</code>.</li>
+<li>Tracked sample env includes what appears to be a real OCR API key in <code>mobile/.env.example</code>.</li>
+<li>Incremental sync can retain stale deleted records until periodic full sync (6 hours).</li>
+<li>Parser queue and metrics are process-memory only (no Redis/queue backend).</li>
+<li>Large route files (<code>backend/src/routes/bills.ts</code>) reduce maintainability and test isolation.</li>
+<li>Outdated docs claim session-only auth while code now persists sessions.</li>
+</ul>
+<h3>Senior-level improvements</h3>
+<ol>
+<li>Move parser queue and rate-limit counters to Redis/managed queue.</li>
+<li>Implement deletion tombstone sync strategy (or CDC/webhooks) to avoid stale clients.</li>
+<li>Split monolithic route files into service/repository/domain layers.</li>
+<li>Remove secrets from examples and local plaintext credential patterns.</li>
+<li>Add contract tests and mobile integration tests for core user journeys.</li>
+<li>Centralize structured audit querying and admin observability dashboards.</li>
+</ol>
+<hr>
+<h2>FOLDER + FILE BREAKDOWN (RECURSIVE)</h2>
+<p>For each entry: Purpose | Why it exists | Connection | What breaks if removed</p>
+<h3>Root folders</h3>
+<ul>
+<li><code>.github/</code>: CI/CD workflows | Deployment/quality automation | GitHub Actions + backend scripts | CI/CD and synthetic checks stop.</li>
+<li><code>.runlogs/</code> (local): runtime logs/artifacts | local troubleshooting | dev runs, GH workflow debug output | no runtime break; lose diagnostics.</li>
+<li><code>.vscode/</code> (local): editor settings | developer ergonomics | IDE only | no runtime break.</li>
+<li><code>backend/</code>: API service | business logic + DB writes | mobile services call its routes | app cannot persist/auth.</li>
+<li><code>mobile/</code>: Expo app | user interface and client logic | talks to backend auth/data APIs | no user-facing product.</li>
+</ul>
+<h3>Root files</h3>
+<ul>
+<li><code>.gitignore</code>: ignore rules | prevent accidental commits | git | secrets/build output may get committed if removed.</li>
+<li><code>README.md</code>: onboarding + run guide | developer setup | all contributors | higher setup errors.</li>
+<li><code>PROJECT_MAP.md</code>: architecture notes | faster navigation | docs only | no runtime break.</li>
+<li><code>DEPLOYMENT.md</code>: deployment runbook | production consistency | Render/EAS workflows | higher ops risk.</li>
+<li><code>ROLLBACK_RUNBOOK.md</code>: incident rollback steps | reduce MTTR | deployment incidents | slower recovery.</li>
+<li><code>package.json</code>: workspace scripts | root commands | mobile/backend scripts | <code>npm run test/typecheck</code> at root breaks.</li>
+<li><code>render.yaml</code>: Render blueprint | infra-as-code | backend deploy | one-click deployment flow breaks.</li>
+</ul>
+<h3><code>.github/workflows</code></h3>
+<ul>
+<li><code>ci.yml</code>: typecheck + tests + gitleaks | quality gate | both packages | no automated regression/security scan.</li>
+<li><code>deploy-staged-rollout.yml</code>: staged deploy + synthetic gate | safer prod release | Render hooks + synthetic script | no controlled promotion.</li>
+<li><code>synthetic-uptime.yml</code>: 5-min synthetic checks | uptime regression detection | backend <code>synthetic:check</code> | production issues detected late.</li>
+</ul>
+<h3><code>backend</code> top-level</h3>
+<ul>
+<li><code>.dockerignore</code>: reduce image context | faster/safer docker build | Dockerfile build | bigger images/slower builds.</li>
+<li><code>.env.example</code>: backend env contract | correct configuration | <code>src/config/env.ts</code> | setup confusion.</li>
+<li><code>Dockerfile</code>: containerized build/run | production portability | Render/manual docker deploy | container deploy breaks.</li>
+<li><code>package.json</code>: backend deps/scripts | run/build/test commands | CI/deploy/runtime | backend lifecycle commands fail.</li>
+<li><code>package-lock.json</code>: dependency lock | reproducibility | npm install | non-deterministic dependency graph.</li>
+<li><code>tsconfig.json</code>: TS compiler behavior | strictness/build output | build/typecheck | compile/typecheck breaks.</li>
+<li><code>vitest.config.ts</code>: backend test config | test discovery/runtime | <code>npm --prefix backend test</code> | tests not discovered correctly.</li>
+</ul>
+<h3><code>backend/scripts</code></h3>
+<ul>
+<li><code>smoke-e2e.mjs</code>: local end-to-end smoke suite | verify full API path | backend + supabase + mobile env | lose quick full-stack sanity check.</li>
+<li><code>synthetic-check.mjs</code>: production synthetic monitor logic | uptime SLO protection | GH synthetic workflows | synthetic monitoring breaks.</li>
+<li><code>bench-latency.mjs</code>: latency benchmark by endpoint | performance diagnostics | running backend+db | lose benchmark tooling.</li>
+<li><code>load-test.mjs</code>: simple load harness | rough capacity check | target endpoint + token optional | no quick stress check.</li>
+</ul>
+<h3><code>backend/supabase</code></h3>
+<ul>
+<li><code>schema.sql</code>: source-of-truth schema + indexes + triggers + RLS bootstrap | DB integrity | all backend queries | fresh environment provisioning breaks.</li>
+<li><code>migrations/2026-02-24-hardening.sql</code>: incremental hardening index migration | upgrade path | existing DBs | drift or missed indexes if ignored.</li>
+</ul>
+<h3><code>backend/src/config</code></h3>
+<ul>
+<li><code>env.ts</code>: validates/normalizes env and hard-fails unsafe prod config | safety gate | every backend module | server boot fails and/or unsafe defaults leak in.</li>
+</ul>
+<h3><code>backend/src/db</code></h3>
+<ul>
+<li><code>postgres.ts</code>: PG pool, query wrapper, transaction helper, DB metrics | DB access abstraction | every route/service DB call | backend cannot query DB.</li>
+<li><code>mappers.ts</code>: DB row -&gt; API doc mappers | shape consistency | routes response mapping | response shapes drift/break.</li>
+<li><code>id.ts</code>: 24-hex ID generator | shared ID format | inserts in routes/services | many creates fail without IDs.</li>
+</ul>
+<h3><code>backend/src/middleware</code></h3>
+<ul>
+<li><code>auth.ts</code>: Bearer token verification (local JWT -&gt; JWKS -&gt; Supabase claims), cache, legacy ownership claim | route protection | all <code>/api/*</code> endpoints | APIs exposed or unusable auth.</li>
+</ul>
+<h3><code>backend/src/observability</code></h3>
+<ul>
+<li><code>logger.ts</code>: JSON structured logger | log consistency | server + db + alerts + errors | logs become inconsistent/noisy.</li>
+<li><code>metrics.ts</code>: in-memory counters/latency + Prometheus render | health/alert signal | server and alerts | <code>/metrics</code> empty/broken, no p95/auth/db signal.</li>
+<li><code>alerts.ts</code>: threshold evaluation + webhook notifications | ops alerts | metrics snapshot | no automatic operational alerting.</li>
+</ul>
+<h3><code>backend/src/routes</code></h3>
+<ul>
+<li><code>auth.ts</code>: <code>/auth/login</code> and <code>/auth/signup</code> with retries/timeouts | user auth lifecycle | mobile auth store | no backend auth fallback.</li>
+<li><code>bills.ts</code>: bill CRUD, line items, payment creation, idempotency keys, soft-delete, audit | core supplier workflow | mobile bills/scan/payment screens | primary feature broken.</li>
+<li><code>payments.ts</code>: payment edit/delete + edit logs + audit + overpay guard | payment integrity | bill detail screen | unsafe payment mutation.</li>
+<li><code>vendors.ts</code>: vendor list/create/update with identity conflict logic | vendor master data | bill creation and detail screens | vendor mapping breaks.</li>
+<li><code>outofstock.ts</code>: note CRUD + status cycling + clear all | notepad feature | notepad tab | out-of-stock module breaks.</li>
+<li><code>udhaar.ts</code>: customer + entries + repayment guard + soft-delete + audit | credit ledger | udhaar screens | udhaar workflow breaks.</li>
+<li><code>analytics.ts</code>: summary/vendor/monthly/anomaly endpoints | BI layer | analytics screen (partially) | backend analytics unavailable.</li>
+<li><code>parse.ts</code>: parser endpoints + async job polling | OCR parse pipeline | scan flow | auto-parse fails entirely.</li>
+<li><code>bills.integration.test.ts</code>: route integration-ish tests | regression coverage | CI test stage | less confidence on bill routes.</li>
+<li><code>parse.integration.test.ts</code>: parse failure-path tests | error behavior guard | CI | parser error contract can regress silently.</li>
+<li><code>payments.concurrency.integration.test.ts</code>: overpayment race guard test | transaction integrity confidence | CI | concurrency regressions likely.</li>
+<li><code>udhaar.integration.test.ts</code>: repayment-overbalance test | business rule confidence | CI | repayment guard can regress.</li>
+</ul>
+<h3><code>backend/src/services</code></h3>
+<ul>
+<li><code>audit.ts</code>: writes audit_events | traceability | bill/payment/udhaar mutating routes | lose audit trail.</li>
+<li><code>billing.ts</code>: payment totals + status attachment helpers | reuse in bills route | bills listing/status | duplicated status logic if removed.</li>
+<li><code>billLineItems.ts</code>: line-item sum/tolerance checks | amount validation | schema + bills route | invalid invoice totals may pass.</li>
+<li><code>billLineItems.test.ts</code>: helper tests | safety net | CI | tolerance logic regressions.</li>
+<li><code>paymentGuards.ts</code>: lock bill + prevent overpayment | financial guardrail | bills/payments routes | overpayment bugs.</li>
+<li><code>paymentGuards.test.ts</code>: payment guard tests | safety | CI | less coverage for core rule.</li>
+<li><code>vendorIdentity.ts</code>: detect same-name conflicting vendor identity | data consistency | vendors route | ambiguous duplicate vendors.</li>
+<li><code>vendorIdentity.test.ts</code>: vendor identity tests | safety | CI | regressions in conflict rules.</li>
+<li><code>ownerMigration.ts</code>: auto-claims <code>legacy-owner</code> rows to first authenticated user | migration compatibility | auth middleware | legacy data remains inaccessible.</li>
+<li><code>groqParser.ts</code>: backend Groq text/image parse with retries/model fallback | parser brain | parse route + queue | parse results unavailable.</li>
+<li><code>parserQueue.ts</code>: in-memory queue with retries/dead-letter/TTL | async parser behavior | parse route | async parse mode fails.</li>
+</ul>
+<h3><code>backend/src/utils</code></h3>
+<ul>
+<li><code>http.ts</code>: response helpers, HttpError, PG/Zod error mapping, error middleware | consistent API errors | every route | inconsistent/unhandled errors.</li>
+<li><code>authContext.ts</code>: typed auth user extraction | safety wrapper | protected routes | repetitive unsafe casts.</li>
+<li><code>asyncHandler.ts</code>: async error wrapper | route ergonomics | all async routes | repetitive try/catch or missed errors.</li>
+<li><code>billStatus.ts</code>: backend status computation | consistent status semantics | billing service/tests | status drift.</li>
+<li><code>billStatus.test.ts</code>: status tests | confidence | CI | regressions undetected.</li>
+</ul>
+<h3><code>backend/src/validators</code></h3>
+<ul>
+<li><code>schemas.ts</code>: Zod schemas for bodies/queries | API contract enforcement | all routes | unsafe inputs hit DB logic.</li>
+<li><code>schemas.test.ts</code>: validation tests | schema confidence | CI | validation regressions.</li>
+</ul>
+<h3><code>backend/src/test</code></h3>
+<ul>
+<li><code>testApp.ts</code>: helper to mount routes with mocked auth in tests | test harness | route integration tests | test setup duplication.</li>
+</ul>
+<h3><code>backend/src</code></h3>
+<ul>
+<li><code>server.ts</code>: app bootstrap, middleware chain, routes, metrics/health, graceful shutdown | entrypoint | everything backend | backend cannot start.</li>
+</ul>
+<h3><code>mobile</code> top-level config/docs/assets meta</h3>
+<ul>
+<li><code>.env.example</code>: mobile env contract | setup clarity | all services reading <code>EXPO_PUBLIC_*</code> | misconfigured clients.</li>
+<li><code>.gitignore</code>: ignore generated/secrets/native artifacts | repo hygiene | git | secrets/native artifacts may leak.</li>
+<li><code>app.json</code>: Expo app metadata | build/runtime config | Expo/EAS | app build metadata invalid.</li>
+<li><code>eas.json</code>: build profiles | release packaging | EAS CLI | standardized builds break.</li>
+<li><code>package.json</code>: mobile deps/scripts | app run/test/typecheck | Expo/Vitest | mobile commands fail.</li>
+<li><code>package-lock.json</code>: dependency lock | reproducibility | npm install | dependency drift.</li>
+<li><code>tsconfig.json</code>: TS config | editor/type safety | build/typecheck | TS checks degrade.</li>
+<li><code>vitest.config.ts</code>: mobile test config | test runner setup | utils/store tests | tests not discovered.</li>
+<li><code>expo-env.d.ts</code> (local generated): Expo type refs | TS helper | TS include | minimal, can regenerate.</li>
+<li><code>.vscode/extensions.json</code> + <code>.vscode/settings.json</code>: editor prefs | dev ergonomics | IDE only | no runtime impact.</li>
+</ul>
+<h3><code>mobile/app</code> routing/screens</h3>
+<ul>
+<li><code>_layout.tsx</code>: global theme/fonts/bootstrap/auth guards/offline detection/PIN lock | app orchestration | authStore + appStore + routing | auth flow, lock, bootstrap break.</li>
+<li><code>index.tsx</code>: animated intro/splash redirect to login/home | branded entry flow | auth state + router | launch UX and initial navigation break.</li>
+<li><code>login.tsx</code>: sign-in/sign-up UI and flows | account entrypoint | authStore + supabase config | users cannot authenticate.</li>
+<li><code>(tabs)/_layout.tsx</code>: tab navigator and auth guard | tab shell | authStore + tab screens | tab routing breaks.</li>
+<li><code>(tabs)/home.tsx</code>: dashboard summary + overdue + recent activity + quick actions | main daily overview | selectors + appStore | core snapshot UX gone.</li>
+<li><code>(tabs)/bills.tsx</code>: bill list/search/filter | bill discovery | appStore + BillCard | bill browsing breaks.</li>
+<li><code>(tabs)/notepad.tsx</code>: out-of-stock management | inventory reminder workflow | appStore out-of-stock actions | notepad feature broken.</li>
+<li><code>(tabs)/udhaar.tsx</code>: customer list/create and balances | credit customer management | appStore udhaar | udhaar list workflow broken.</li>
+<li><code>(tabs)/analytics.tsx</code>: analytics screen with remote-first/local fallback calculations | decision support | backend analytics + selectors | analytics UX unavailable.</li>
+<li><code>scan.tsx</code>: capture/upload OCR parse confirm and save bill | ingestion pipeline UI | billPipeline + appStore.addBill | new bill creation flow broken.</li>
+<li><code>settings.tsx</code>: language/security/sync/health/backup/signout controls | admin controls | appStore + authStore + backend health | operational controls missing.</li>
+<li><code>bill/[id].tsx</code>: bill detail + payment CRUD + secure actions | payment operations | appStore payment APIs + PIN overlay | bill payment management broken.</li>
+<li><code>udhaar/[id].tsx</code>: customer ledger detail + add/delete entries | udhaar transaction operations | appStore udhaar actions + PIN | customer ledger editing breaks.</li>
+<li><code>vendor/[id].tsx</code>: vendor profile with related bills | vendor deep-link | appStore vendors+bills | vendor drill-down unavailable.</li>
+<li><code>+not-found.tsx</code>: fallback route | graceful bad path handling | Expo Router | poor handling for unknown routes.</li>
+<li><code>+html.tsx</code>: web-only root HTML template | web target support | Expo web build | web output defaults only.</li>
+</ul>
+<h3><code>mobile/components/common</code></h3>
+<ul>
+<li><code>ScreenContainer.tsx</code>: shared gradient/background/scroll scaffold | visual consistency | all screens | duplicated layout code.</li>
+<li><code>ScreenHeader.tsx</code>: standardized title/subtitle/offline indicator | consistent headers | most screens | duplicated header logic.</li>
+<li><code>EmptyState.tsx</code>: reusable empty-state card | UX consistency | list screens | repeated empty UI patterns.</li>
+</ul>
+<h3><code>mobile/components/bill</code></h3>
+<ul>
+<li><code>BillCard.tsx</code>: reusable bill summary card | consistent bill row UI | bills/vendor screens | repeated bill item UI.</li>
+<li><code>PaymentEntry.tsx</code>: payment row UI with edit/delete actions | payment timeline display | bill detail | payment list readability drops.</li>
+</ul>
+<h3><code>mobile/components/ui</code></h3>
+<ul>
+<li><code>AppText.tsx</code>: typography variant wrapper | consistent text styles | entire UI | typography inconsistency.</li>
+<li><code>GlassCard.tsx</code>: reusable card shell (BlurView fallback) | unified card visual language | most screens/components | style duplication.</li>
+<li><code>GradientButton.tsx</code>: animated CTA button | common button behavior | most actions | inconsistent actions/press feedback.</li>
+<li><code>MetricCard.tsx</code>: dashboard metric tile | dashboard design reuse | home screen | repeated custom metric UI.</li>
+<li><code>BalanceBar.tsx</code>: paid vs total progress | payment visualization | bill/home cards | less readable payment progress.</li>
+<li><code>StatusBadge.tsx</code>: status pill renderer | status consistency | bills/home/bill detail | repeated status style logic.</li>
+<li><code>SkeletonLoader.tsx</code>: loading placeholders | perceived performance | scan/possible loading states | rough loading UX.</li>
+<li><code>PinOverlay.tsx</code>: secure-action PIN gate | local action protection | bill detail/udhaar/settings/root lock | PIN-gated actions lose protection.</li>
+</ul>
+<h3><code>mobile/services</code></h3>
+<ul>
+<li><code>apiClient.ts</code>: base request wrapper with timeout/retry/error normalization | network reliability | backend client/auth/parser/health | raw fetch duplication.</li>
+<li><code>backendClient.ts</code>: auth header resolution, token refresh, multi-base-url fallback routing | robust API transport | all authed backend calls | authenticated API access breaks.</li>
+<li><code>backendAuth.ts</code>: unauthenticated backend login/signup bridge | auth fallback path | authStore | no backend auth fallback.</li>
+<li><code>backendData.ts</code>: typed API adapters for domain entities | domain data gateway | appStore/screens | every feature API mapping breaks.</li>
+<li><code>backendHealth.ts</code>: settings health check helper | operator feedback | settings screen | health check button useless.</li>
+<li><code>backendParser.ts</code>: calls parser endpoints + async job polling | scan parser backend integration | billPipeline | parser backend integration breaks.</li>
+<li><code>billPipeline.ts</code>: parse fallback orchestration (backend vision -&gt; backend text -&gt; optional direct groq -&gt; regex/manual) | resilient scan flow | scan screen | parse orchestration lost.</li>
+<li><code>groqParser.ts</code>: direct mobile Groq parser fallback logic | dev-only fallback | billPipeline (when enabled) | direct fallback unavailable.</li>
+<li><code>ocr.ts</code>: OCR.space fallback connector | parser fallback source text | billPipeline | less robust parse fallback.</li>
+<li><code>regexParser.ts</code>: minimal last-resort text parser | safety fallback | billPipeline | fewer salvageable parses.</li>
+<li><code>imageHash.ts</code>: image fingerprint helper | duplicate detection/idempotency | scan/save bill | duplicate-image safety weaker.</li>
+<li><code>sessionStorage.ts</code>: SecureStore-first with AsyncStorage fallback for session data | token/session durability | authStore + supabaseClient | session persistence weaker/broken.</li>
+<li><code>supabaseClient.ts</code>: Supabase client and config guard | auth backbone | authStore/login | Supabase auth path breaks.</li>
+<li><code>crashReporting.ts</code>: global crash webhook reporting | release diagnostics | root layout init | no remote crash telemetry.</li>
+</ul>
+<h3><code>mobile/store</code></h3>
+<ul>
+<li><code>authStore.ts</code>: auth state machine (initialize/signin/signup/signout, supabase + backend fallback) | session control | login, root layout, backend client | app auth lifecycle broken.</li>
+<li><code>appStore.ts</code>: main domain store + sync/write actions | central client state | almost all screens/services | app business features collapse.</li>
+<li><code>selectors.ts</code>: derived calculations (status/summary/trends) | logic reuse | home/bills/analytics/udhaar | duplicate/inconsistent computed data.</li>
+<li><code>authStore.e2e.test.ts</code>: auth persistence behavior test | confidence on restart flow | CI | higher auth regression risk.</li>
+<li><code>appStore.e2e.test.ts</code>: store flow tests | confidence on sync/payment behavior | CI | higher state regression risk.</li>
+</ul>
+<h3><code>mobile/utils</code></h3>
+<ul>
+<li><code>currency.ts</code>: paise/rupee conversion and formatting | money formatting consistency | many screens/services | currency display/math drifts.</li>
+<li><code>date.ts</code>: display/date helpers | date consistency | list/detail/analytics selectors | repeated date parsing bugs.</li>
+<li><code>dateInput.ts</code>: strict <code>YYYY-MM-DD</code> parser -&gt; ISO | form validation consistency | scan/payment/udhaar forms | date format bugs increase.</li>
+<li><code>errors.ts</code>: user-friendly error mapping | UX clarity | many catch blocks | raw/poor error messages.</li>
+<li><code>pin.ts</code>: PIN hash/verify/lockout logic | local security layer | PinOverlay/settings/root lock | PIN functionality breaks.</li>
+<li><code>status.ts</code>: bill status arithmetic | feature consistency | selectors/screens | status logic diverges.</li>
+<li><code>currency.test.ts</code>, <code>dateInput.test.ts</code>, <code>errors.test.ts</code>, <code>status.test.ts</code>: utility tests | confidence | CI | increased regression risk.</li>
+</ul>
+<h3><code>mobile/i18n</code></h3>
+<ul>
+<li><code>index.ts</code>: i18n bootstrapping and language selection | localization system | settings + all <code>t()</code> usage | localization breaks.</li>
+<li><code>en.json</code>: English string table | default locale | UI labels | missing labels.</li>
+<li><code>hi.json</code>: Hindi string table placeholder/corrupted text currently | multilingual support | localization | Hindi UX currently unusable quality.</li>
+<li><code>mr.json</code>: Marathi string table placeholder/corrupted text currently | multilingual support | localization | Marathi UX currently unusable quality.</li>
+</ul>
+<h3><code>mobile/theme</code></h3>
+<ul>
+<li><code>tokens.ts</code>: palette/gradients/spacing/typography/shadows | design system core | all UI components | style consistency collapses.</li>
+</ul>
+<h3><code>mobile/types</code></h3>
+<ul>
+<li><code>models.ts</code>: shared domain types | compile-time contracts | store/services/components | type safety and contract coherence break.</li>
+</ul>
+<h3><code>mobile/data</code></h3>
+<ul>
+<li><code>mockData.ts</code>: demo data fixtures | local/dev demo scaffolding | optional/dev | no production runtime break.</li>
+</ul>
+<h3><code>mobile/assets</code></h3>
+<ul>
+<li><code>assets/fonts/SpaceMono-Regular.ttf</code>: optional font asset | web/native typography fallback | assets pipeline | minor visual impact.</li>
+<li><code>assets/images/icon.png</code>, <code>adaptive-icon.png</code>, <code>splash-icon.png</code>, <code>favicon.png</code>: app identity assets | app package branding | Expo build metadata | app icons/splash/favicons break.</li>
+</ul>
+<h3>Local/untracked sensitive artifacts</h3>
+<ul>
+<li><code>mobile/.env</code>: active local mobile secrets/config | local development runtime | mobile services | app may fail locally without it.</li>
+<li><code>backend/.env</code> (present locally): active backend secrets/config | backend runtime | backend boot/auth/db | backend local run fails.</li>
+<li><code>mobile/credentials.json</code>: EAS local keystore credentials with plaintext passwords | signing automation | EAS local credentials source | local build signing fails if removed, but keeping plaintext is high risk.</li>
+<li><code>mobile/keystore/kiranatrack-upload.jks</code>: Android upload key | release signing | EAS build | cannot sign/update Play artifacts if lost.</li>
+<li><code>.runlogs/*</code>: logs/workflow snapshots | diagnostics | dev only | no runtime break.</li>
+<li>root <code>.vscode/*</code>: editor setup | dev convenience | IDE only | no runtime break.</li>
+</ul>
+<h3>Generated/third-party directories (scanned at folder level)</h3>
+<ul>
+<li><code>backend/dist/</code> (40 files): transpiled backend output | <code>start:prod</code> runtime artifact | generated from <code>src</code> | prod start command fails if absent.</li>
+<li><code>backend/node_modules/</code>, <code>mobile/node_modules/</code>: third-party dependencies | runtime/build/test dependencies | npm install outputs | app/backend cannot run without them.</li>
+</ul>
+<hr>
+<h2>FRONTEND ANALYSIS</h2>
+<h3>Framework/library and why</h3>
+<ul>
+<li>Expo + React Native + TypeScript + Expo Router + Zustand.</li>
+<li>Why: fast mobile iteration, OTA-friendly workflow, strong TS safety, file-based routing, lightweight state management.</li>
+</ul>
+<h3>Routing</h3>
+<ul>
+<li>File-based via Expo Router.</li>
+<li>Root guard in <code>mobile/app/_layout.tsx</code> decides intro/login/protected routes.</li>
+<li>Tab guard in <code>mobile/app/(tabs)/_layout.tsx</code> re-checks auth.</li>
+</ul>
+<h3>State management</h3>
+<ul>
+<li>Zustand stores:<ul>
+<li><code>authStore</code>: session lifecycle and backend/supabase auth fallback.</li>
+<li><code>appStore</code>: domain entities + sync/write operations + settings.</li>
+</ul>
+</li>
+<li>Persist middleware for app data (<code>AsyncStorage</code>), plus secure session storage abstraction.</li>
+</ul>
+<h3>Forms</h3>
+<ul>
+<li>Local component state + imperative validation (<code>Alert</code> on failure).</li>
+<li>Most forms are controlled <code>TextInput</code> fields.</li>
+</ul>
+<h3>Validation logic</h3>
+<ul>
+<li>Frontend: lightweight checks (email, password length, amount &gt; 0, date format).</li>
+<li>Backend: strict Zod + database constraints for authoritative validation.</li>
+</ul>
+<h3>API calling flow</h3>
+<ol>
+<li>Screen/action calls appStore method.</li>
+<li>appStore method calls <code>backendData</code> service.</li>
+<li><code>backendData</code> calls <code>authApiRequest</code> in <code>backendClient</code>.</li>
+<li><code>backendClient</code> injects token, handles refresh/fallback base URLs.</li>
+<li>Backend route validates and writes DB.</li>
+<li>Response mapped to typed models and merged into store.</li>
+</ol>
+<h3>Component hierarchy (high-level)</h3>
+<ul>
+<li><code>app/_layout.tsx</code><ul>
+<li>route stack + theme + global <code>PinOverlay</code></li>
+<li>tab layout<ul>
+<li>screen components<ul>
+<li>common wrappers (<code>ScreenContainer</code>, <code>ScreenHeader</code>)</li>
+<li>feature components (<code>BillCard</code>, <code>PaymentEntry</code>)</li>
+<li>primitives (<code>AppText</code>, <code>GlassCard</code>, <code>GradientButton</code>)</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h3>Folder structure reasoning</h3>
+<ul>
+<li><code>app/</code>: route concerns.</li>
+<li><code>components/</code>: reusable UI by concern (<code>common</code>, <code>ui</code>, <code>bill</code>).</li>
+<li><code>services/</code>: transport/integration boundaries.</li>
+<li><code>store/</code>: state and actions.</li>
+<li><code>utils/</code>: pure helper logic.</li>
+<li><code>types/</code>: shared contracts.</li>
+<li><code>theme/</code>: design tokens.</li>
+</ul>
+<h3>Reusability patterns</h3>
+<ul>
+<li>Good reuse in primitives (<code>AppText</code>, <code>GlassCard</code>, <code>GradientButton</code>) and selectors.</li>
+<li>Business rules partly centralized (status, currency, date parsing).</li>
+</ul>
+<h3>Frontend performance concerns</h3>
+<ul>
+<li>Large store updates can re-render broad trees if selectors are not scoped carefully.</li>
+<li>Some screens do heavy array sorting/filtering on every render path (acceptable now, may degrade at scale).</li>
+<li>OCR/base64 operations are heavy; image optimization partially mitigates.</li>
+</ul>
+<h3>Frontend security concerns</h3>
+<ul>
+<li>Local secure action uses PIN; good for casual protection, not a substitute for server auth.</li>
+<li>Session storage fallback to AsyncStorage if SecureStore unavailable is weaker.</li>
+<li>Exposed <code>EXPO_PUBLIC_*</code> values are inherently client-visible; no real secrets should ever be there.</li>
+<li>Critical hygiene issue: tracked <code>.env.example</code> contains what looks like a real OCR key.</li>
+</ul>
+<h3>Line-by-line style walkthrough of important frontend files</h3>
+<h4><code>mobile/app/_layout.tsx</code></h4>
+<ul>
+<li>Startup orchestration:<ul>
+<li>font load + crash reporting init.</li>
+<li>auth initialization once ready.</li>
+<li>state bootstrap tied to authenticated user.</li>
+<li>route guarding between intro/login/protected.</li>
+</ul>
+</li>
+<li>Security/runtime hooks:<ul>
+<li>NetInfo listener toggles offline mode and sync-on-reconnect.</li>
+<li>AppState listener enforces PIN lock on foreground when enabled.</li>
+</ul>
+</li>
+<li>Why this matters: it is the single most important lifecycle coordinator.</li>
+</ul>
+<h4><code>mobile/app/scan.tsx</code></h4>
+<ul>
+<li>Capture/upload image.</li>
+<li>Run parser pipeline with multiple fallbacks.</li>
+<li>Normalize parsed fields and allow manual correction.</li>
+<li>Validate date/amount, apply line-item fallback logic, persist bill with idempotency key.</li>
+<li>Why this matters: highest-complexity frontend workflow and major error surface.</li>
+</ul>
+<h4><code>mobile/store/appStore.ts</code></h4>
+<ul>
+<li>Defines canonical app state, synchronization strategy, and all mutating actions.</li>
+<li>Contains incremental sync + periodic full sync policy.</li>
+<li>Enforces online requirement for all writes.</li>
+<li>Why this matters: domain consistency lives here; bugs here affect all screens.</li>
+</ul>
+<h4><code>mobile/services/backendClient.ts</code></h4>
+<ul>
+<li>Manages auth headers and refresh behavior.</li>
+<li>Handles multiple candidate base URLs and cooldown on failed URLs.</li>
+<li>Why this matters: connectivity and session reliability hinge on this file.</li>
+</ul>
+<hr>
+<h2>BACKEND ANALYSIS</h2>
+<h3>Framework and why</h3>
+<ul>
+<li>Node.js + Express + TypeScript + pg + Supabase JS + Zod.</li>
+<li>Why: minimal overhead, clear SQL control, straightforward API layer.</li>
+</ul>
+<h3>Middleware order and rationale</h3>
+<p>Current order in <code>backend/src/server.ts</code>:</p>
+<ol>
+<li>Request ID injection.</li>
+<li>Request timing/metrics/logging hook.</li>
+<li>CORS.</li>
+<li>Helmet.</li>
+<li>Compression.</li>
+<li>JSON body parser.</li>
+<li>Auth middleware.</li>
+<li>Global rate limiter.</li>
+<li>Route mounts (+ stricter limiter on <code>/auth</code> and <code>/api/parse</code>).</li>
+<li>Error middleware.</li>
+</ol>
+<p>Why this order is mostly right:</p>
+<ul>
+<li>Request ID early for end-to-end traceability.</li>
+<li>Security headers before route handling.</li>
+<li>Auth before protected route logic.</li>
+<li>Error middleware last.</li>
+</ul>
+<h3>Request lifecycle</h3>
+<ul>
+<li>Incoming request enters middleware chain.</li>
+<li>For <code>/api/*</code>, auth middleware verifies Bearer token and enriches request with <code>authUserId</code>.</li>
+<li>Route parses body/query via Zod and executes DB operations (often in transaction).</li>
+<li>Domain mapping returns stable API document shape.</li>
+<li>Error middleware maps validation/PG/custom errors to consistent JSON.</li>
+</ul>
+<h3>Route structure</h3>
+<ul>
+<li>Grouped by business entity (<code>bills</code>, <code>payments</code>, <code>vendors</code>, etc.) plus <code>auth</code>, <code>analytics</code>, <code>parse</code>.</li>
+<li><code>bills.ts</code> handles both bill and payment-create route for bill context.</li>
+</ul>
+<h3>Controller logic quality</h3>
+<ul>
+<li>Strong transaction usage for money-sensitive writes.</li>
+<li>Idempotency keys for bill/payment create are a good senior touch.</li>
+<li>Weakness: <code>bills.ts</code> is too large, mixing multiple responsibilities.</li>
+</ul>
+<h3>Error handling strategy</h3>
+<ul>
+<li>Centralized <code>HttpError</code>, Zod handling, and PG code/constraint mapping.</li>
+<li>Request IDs returned in error payloads: good for support/debug.</li>
+</ul>
+<h3>Logging strategy</h3>
+<ul>
+<li>Structured JSON logs with level filtering.</li>
+<li>Request completion logs include latency/status/user-agent/ip.</li>
+</ul>
+<h3>Security layers</h3>
+<ul>
+<li>Auth: JWT verification via local secret -&gt; JWKS -&gt; getClaims fallback.</li>
+<li>Rate limits: global + auth route + parser route.</li>
+<li>Helmet + CORS constraints (strict in production by env validation).</li>
+<li>SQL injection defense via parameterized queries.</li>
+<li>PIN in frontend adds local action gating (not backend auth).</li>
+</ul>
+<h3>Data validation</h3>
+<ul>
+<li>Zod schemas for all key payloads and query params.</li>
+<li>DB constraints + unique indexes + FK + checks provide second layer.</li>
+</ul>
+<h3>Environment variable usage</h3>
+<ul>
+<li>Strict validated schema; production hard-fails if critical settings missing (<code>SUPABASE_DB_POOL_URL</code>, <code>SUPABASE_JWT_SECRET</code>, explicit <code>CORS_ORIGIN</code>).</li>
+</ul>
+<h3>Modularization strategy</h3>
+<ul>
+<li>Good separation for <code>config</code>, <code>db</code>, <code>middleware</code>, <code>observability</code>, <code>routes</code>, <code>services</code>, <code>utils</code>.</li>
+<li>Needs finer split in large route files.</li>
+</ul>
+<hr>
+<h2>DATABASE ANALYSIS</h2>
+<h3>Database and why</h3>
+<ul>
+<li>Supabase Postgres (SQL, relational).</li>
+<li>Chosen for transactional consistency, joins, constraints, and managed infra.</li>
+</ul>
+<h3>SQL or NoSQL</h3>
+<ul>
+<li>SQL.</li>
+<li>Appropriate because entities are relational and require transactional correctness (bills/payments/udhaar).</li>
+</ul>
+<h3>Schema by table (purpose)</h3>
+<ul>
+<li><code>vendors</code>: supplier master.</li>
+<li><code>bills</code>: invoice header per vendor.</li>
+<li><code>bill_line_items</code>: bill item details.</li>
+<li><code>payments</code>: bill installment/payments.</li>
+<li><code>payment_edit_logs</code>: payment change history.</li>
+<li><code>out_of_stock_items</code>: shopping/restock tracker.</li>
+<li><code>udhaar_customers</code>: credit customers.</li>
+<li><code>udhaar_entries</code>: credit/repayment rows.</li>
+<li><code>audit_events</code>: immutable action audit trail.</li>
+</ul>
+<h3>Field rationale highlights</h3>
+<ul>
+<li>IDs are 24-hex text for cross-tier compatibility.</li>
+<li><code>owner_user_id</code> on tenant tables for user scoping.</li>
+<li><code>deleted_at</code> for soft deletes on key mutable financial tables.</li>
+<li><code>client_request_id</code> for idempotent create operations.</li>
+</ul>
+<h3>Indexing strategy</h3>
+<ul>
+<li>Owner/date/vendor filters indexed.</li>
+<li>Unique constraints for duplicate prevention (vendor name per owner, bill number per vendor active, payment client request id, image hash active).</li>
+<li>Audit and udhaar indexes support common query paths.</li>
+</ul>
+<h3>Normalization level</h3>
+<ul>
+<li>Roughly 3NF across core domain tables.</li>
+<li>Denormalized aggregates are computed in queries rather than stored.</li>
+</ul>
+<h3>Relations</h3>
+<ul>
+<li><code>vendors 1-&gt;many bills</code></li>
+<li><code>bills 1-&gt;many bill_line_items</code></li>
+<li><code>bills 1-&gt;many payments</code></li>
+<li><code>payments 1-&gt;many payment_edit_logs</code></li>
+<li><code>udhaar_customers 1-&gt;many udhaar_entries</code></li>
+<li><code>audit_events</code> references entity IDs logically (not FK-enforced to every entity table).</li>
+</ul>
+<h3>Text relational diagram</h3>
+<pre><code>owners (via owner_user_id)
+  |- vendors(id)
+      |- bills(id, vendor_id)
+          |- bill_line_items(id, bill_id)
+          |- payments(id, bill_id)
+              |- payment_edit_logs(id, payment_id)
+  |- out_of_stock_items(id)
+  |- udhaar_customers(id)
+      |- udhaar_entries(id, customer_id)
+
+Cross-cutting:
+audit_events(id, owner_user_id, entity_type, entity_id, action, payload)
+</code></pre>
+<h3>Authentication data storage</h3>
+<ul>
+<li>Primary auth identities are in Supabase Auth.</li>
+<li>App DB stores <code>owner_user_id</code> (Supabase user id reference string), not passwords.</li>
+</ul>
+<h3>Security risks</h3>
+<ul>
+<li>Service role usage is powerful; backend compromise means full DB blast radius.</li>
+<li>RLS policy <code>service_role_all</code> is broad by design.</li>
+<li>Legacy ownership auto-claim can do large updates on first auth for a user.</li>
+</ul>
+<h3>Migration handling</h3>
+<ul>
+<li>SQL-first migration model (<code>schema.sql</code> + migration scripts), manual/apply-by-runbook.</li>
+<li>No automated migration runner included in backend startup.</li>
+</ul>
+<h3>What breaks if schema changes</h3>
+<ul>
+<li>Any renamed/removed column in table maps breaks route SQL immediately.</li>
+<li>Index/constraint name changes can break PG error-to-message mapping.</li>
+<li>Soft-delete and idempotency semantics rely on specific <code>deleted_at</code> and <code>client_request_id</code> fields.</li>
+</ul>
+<hr>
+<h2>AUTHENTICATION &amp; SECURITY</h2>
+<h3>How login works internally</h3>
+<ul>
+<li>Preferred path: mobile uses Supabase signIn/signUp directly.</li>
+<li>Fallback path: on upstream/network failures, authStore uses backend <code>/auth/login</code> or <code>/auth/signup</code>.</li>
+<li>Backend auth route uses Supabase service-role client to perform auth operations with retry policy.</li>
+</ul>
+<h3>Password hashing</h3>
+<ul>
+<li>Passwords are handled by Supabase Auth; hashing is managed upstream (not custom in this codebase).</li>
+</ul>
+<h3>Token generation logic</h3>
+<ul>
+<li>Access/refresh tokens issued by Supabase.</li>
+<li>Backend verifies tokens; does not mint custom JWTs.</li>
+</ul>
+<h3>Token expiration handling</h3>
+<ul>
+<li>Backend checks token validity and responds 401.</li>
+<li>Mobile backend client tries token refresh through Supabase on 401 before failing.</li>
+</ul>
+<h3>Token storage</h3>
+<ul>
+<li>Supabase client uses <code>SecureStore</code> via custom auth storage abstraction.</li>
+<li>Fallback to AsyncStorage if SecureStore unavailable.</li>
+<li>Additional backend session bridge payload persisted in secure session storage key.</li>
+</ul>
+<h3>Vulnerabilities (brutally honest)</h3>
+<ol>
+<li>High: local <code>mobile/credentials.json</code> stores keystore passwords in plaintext.</li>
+<li>High: <code>mobile/.env.example</code> contains a real-looking OCR API key.</li>
+<li>Medium: incremental sync + soft-delete can show stale/deleted records until full sync.</li>
+<li>Medium: in-memory parser queue/rate-limiter/metrics are not distributed and reset on restart.</li>
+<li>Medium: frontend includes optional direct Groq key path (dev-only guarded, but risky if misconfigured).</li>
+<li>Low-Medium: auth and app docs out of sync with current persistence behavior.</li>
+</ol>
+<h3>OWASP alignment</h3>
+<ul>
+<li>SQL injection: mostly mitigated by parameterized queries.</li>
+<li>XSS: low risk in RN native; web target still should sanitize any injected HTML (not currently used).</li>
+<li>CSRF: low because Bearer token auth, not cookie-based session auth.</li>
+<li>Broken auth: guarded reasonably; token refresh and verification chain are strong.</li>
+<li>Sensitive data exposure: problematic local credentials and env hygiene.</li>
+</ul>
+<h3>Production hardening improvements</h3>
+<ol>
+<li>Remove any real keys from <code>.env.example</code> immediately.</li>
+<li>Store EAS credentials via secure CI secret store, not plaintext local JSON in shared repo folder.</li>
+<li>Add secret scanning pre-commit + CI fail on detected keys in examples.</li>
+<li>Move parser queue to durable external queue.</li>
+<li>Add distributed rate limiting and centralized metrics storage.</li>
+<li>Add explicit sync tombstone/deletion propagation strategy.</li>
+</ol>
+<hr>
+<h2>DEVOPS &amp; DEPLOYMENT</h2>
+<h3>Local run</h3>
+<ul>
+<li>Backend: <code>npm --prefix backend run dev</code>.</li>
+<li>Mobile: <code>npm --prefix mobile run start</code>.</li>
+<li>Root convenience scripts available.</li>
+</ul>
+<h3>Build process</h3>
+<ul>
+<li>Backend build: <code>tsc</code> -&gt; <code>backend/dist</code>.</li>
+<li>Backend container: multi-stage Docker build.</li>
+<li>Mobile production build: EAS profiles (<code>preview</code>, <code>production</code>).</li>
+</ul>
+<h3>Environment configuration</h3>
+<ul>
+<li>Strong backend env validation in code.</li>
+<li>Mobile uses <code>EXPO_PUBLIC_*</code> env vars (client-visible).</li>
+</ul>
+<h3>Deployment method</h3>
+<ul>
+<li>Backend: Render blueprint (<code>render.yaml</code>) with envs.</li>
+<li>Mobile: EAS build and submit flows.</li>
+</ul>
+<h3>Hosting service analysis</h3>
+<ul>
+<li>Render starter plan likely acceptable for small-medium workloads.</li>
+<li>Supabase managed Postgres/Auth used for persistence and identity.</li>
+</ul>
+<h3>CI/CD</h3>
+<ul>
+<li>Present:<ul>
+<li>CI quality workflow.</li>
+<li>staged rollout workflow.</li>
+<li>scheduled synthetic uptime workflow.</li>
+</ul>
+</li>
+</ul>
+<h3>Git branching strategy</h3>
+<ul>
+<li>Not explicitly documented.</li>
+<li>CI triggers on <code>main</code>/<code>master</code> and PR; likely trunk-based in practice.</li>
+</ul>
+<h3>Production readiness level</h3>
+<ul>
+<li>Moderate.</li>
+<li>Strong fundamentals (validation, constraints, audit, observability) but blocked by secret hygiene issues and stateful in-memory infra components.</li>
+</ul>
+<hr>
+<h2>MOBILE CONVERSION</h2>
+<ul>
+<li>This is not a web-to-mobile conversion.</li>
+<li>It is a native-first Expo React Native app.</li>
+<li>So PWA/WebView conversion limitations are mostly not applicable.</li>
+<li>Trade-off: faster RN iteration but still dependent on JS bridge/runtime performance and Expo ecosystem constraints.</li>
+</ul>
+<hr>
+<h2>BUGS &amp; STRUGGLES YOU LIKELY FACED (AND WHY)</h2>
+<h3>Likely common bugs</h3>
+<ol>
+<li>Duplicate create races for bills/payments before idempotency keys were added.</li>
+<li>Payment over-collection conflicts under concurrent operations.</li>
+<li>Parser timeouts/unreliable OCR results.</li>
+<li>Auth session confusion during network flakiness and token refresh transitions.</li>
+<li>Deleted entity appearing on secondary devices until full sync refresh.</li>
+</ol>
+<h3>Logical mistakes likely</h3>
+<ul>
+<li>Over-reliance on local computed analytics while backend analytics exist.</li>
+<li>Mixing transport/domain/transaction logic in very large route files.</li>
+<li>Documentation drift vs actual auth persistence behavior.</li>
+</ul>
+<h3>Security flaws</h3>
+<ul>
+<li>Plaintext signing credentials file locally.</li>
+<li>Real-looking API key in tracked sample env.</li>
+</ul>
+<h3>Performance bottlenecks</h3>
+<ul>
+<li>Process-level queue for parser, no horizontal coordination.</li>
+<li>Large in-memory metrics arrays and expensive percentile sorting each snapshot (fine now, weak at high scale).</li>
+<li>App-side large-array map/filter/sort on each render path.</li>
+</ul>
+<h3>Race/async risks</h3>
+<ul>
+<li>Incremental sync merge strategy can conflict with near-simultaneous writes from multiple devices.</li>
+<li>Parser jobs vanish if process restarts mid-processing.</li>
+<li>Auth fallback + refresh path can produce edge-state complexity.</li>
+</ul>
+<h3>Memory/resource risks</h3>
+<ul>
+<li>In-memory counters and queue grow until capped/TTL; bounded but still per-process memory state.</li>
+</ul>
+<h3>Senior fixes</h3>
+<ol>
+<li>Introduce durable queue + job store for parser (Redis/PG queue).</li>
+<li>Introduce server-driven sync versioning/tombstones.</li>
+<li>Split route files into service/repository layers.</li>
+<li>Add stricter integration/e2e tests around sync/deletion/conflict behavior.</li>
+<li>Remove credential anti-patterns and enforce security checks in CI.</li>
+</ol>
+<hr>
+<h2>INTERVIEW PREPARATION (30 DEEP QUESTIONS)</h2>
+<p>Each includes: Answer, Trap follow-up, Confident answer strategy.</p>
+<ol>
+<li><p>Why use Postgres instead of NoSQL here?
+Answer: transactional integrity for bills/payments/repayments and relational joins.
+Trap: Could Mongo do this too?
+Confident: yes, but SQL constraints + transactions reduce financial consistency risk.</p>
+</li>
+<li><p>How do you prevent duplicate bill creation?
+Answer: idempotency via <code>client_request_id</code> and unique indexes plus conflict handling.
+Trap: What about concurrent requests?
+Confident: unique constraints are DB-enforced race-proof; app returns existing record path.</p>
+</li>
+<li><p>How is overpayment prevented?
+Answer: transaction lock + sum query + guard (<code>assertPaymentWithinBillLimit</code>).
+Trap: Two payments at same time?
+Confident: row locking + transactional checks enforce serial correctness.</p>
+</li>
+<li><p>Why soft-delete bills/payments?
+Answer: preserve auditability/history and avoid hard data loss.
+Trap: Then why not hard-delete all?
+Confident: financial systems need traceability and reversible analysis.</p>
+</li>
+<li><p>How does auth verification work server-side?
+Answer: local JWT secret verify, fallback JWKS, final fallback Supabase getClaims.
+Trap: Why multiple methods?
+Confident: latency + resiliency; local fast path with robust fallback.</p>
+</li>
+<li><p>What is the risk of service-role backend auth usage?
+Answer: backend compromise can fully control auth/admin operations.
+Trap: How do you mitigate?
+Confident: strict secret management, network hardening, least privilege and monitoring.</p>
+</li>
+<li><p>How does mobile handle offline mode?
+Answer: NetInfo sets offline state; writes are blocked; sync occurs on reconnect.
+Trap: What if user edits offline?
+Confident: currently unsupported for write paths by design to avoid conflict complexity.</p>
+</li>
+<li><p>Explain your sync strategy.
+Answer: incremental fetch by <code>updatedAfter</code> with periodic full sync every 6h.
+Trap: How are deletions propagated?
+Confident: current gap; needs tombstones or deletion feed (acknowledge honestly).</p>
+</li>
+<li><p>Why maintain both frontend and backend validation?
+Answer: UX feedback on client, authoritative enforcement on server.
+Trap: Is client validation enough?
+Confident: never, server/db constraints are mandatory.</p>
+</li>
+<li><p>How are DB errors translated to API messages?
+Answer: centralized PG error code/constraint mapping in error middleware.
+Trap: Can this become stale?
+Confident: yes if constraints renamed; tests and constants should track it.</p>
+</li>
+<li><p>How are parser failures handled?
+Answer: layered fallback (backend image -&gt; backend text -&gt; optional direct Groq -&gt; regex -&gt; manual).
+Trap: What if all fail?
+Confident: manual data entry still saves workflow continuity.</p>
+</li>
+<li><p>Why is parser queue in-memory and what are limits?
+Answer: simple initial design, but non-durable and non-distributed.
+Trap: Production-ready?
+Confident: not for scale; should move to durable queue.</p>
+</li>
+<li><p>How is observability implemented?
+Answer: structured logs + in-memory metrics + Prometheus endpoint + alert webhooks.
+Trap: Any downside?
+Confident: memory-local metrics reset on restart; not aggregated cross-instance.</p>
+</li>
+<li><p>How do you secure <code>/metrics</code> and <code>/health/detailed</code>?
+Answer: optional token gate + 404-style concealment in production.
+Trap: Why 404 not 401?
+Confident: reduces endpoint discoverability; still combine with network controls.</p>
+</li>
+<li><p>Why use Zod schemas?
+Answer: runtime validation with typed outputs and consistent failure handling.
+Trap: Does Zod replace DB constraints?
+Confident: no, DB constraints remain the final authority.</p>
+</li>
+<li><p>How do you avoid SQL injection?
+Answer: parameterized SQL via <code>dbQuery(text, values)</code> everywhere.
+Trap: Any dynamic SQL risk?
+Confident: dynamic fragments are limited to known safe clauses; values remain parameterized.</p>
+</li>
+<li><p>Why keep audit_events?
+Answer: immutable change history for sensitive entities.
+Trap: Could logs alone be enough?
+Confident: logs are ephemeral/noisy; audit table is queryable and domain-scoped.</p>
+</li>
+<li><p>What is owner auto-claim migration?
+Answer: first authenticated user claims legacy rows with <code>owner_user_id=&#39;legacy-owner&#39;</code>.
+Trap: Risk?
+Confident: large updates/locking risk on first run; one-time migration script would be cleaner.</p>
+</li>
+<li><p>Why is frontend analytics partly local?
+Answer: fallback resilience and low latency, but causes potential drift from backend truth.
+Trap: Best approach?
+Confident: pick one source-of-truth or clearly display fallback state.</p>
+</li>
+<li><p>How are payment edits audited?
+Answer: writes to <code>payment_edit_logs</code> and <code>audit_events</code> before response.
+Trap: What about deletions?
+Confident: soft delete plus audit event preserve mutation trail.</p>
+</li>
+<li><p>How do you handle token expiration in mobile API calls?
+Answer: backend client retries once after <code>refreshSession</code> on 401.
+Trap: If refresh fails?
+Confident: surface session-expired message and force re-login.</p>
+</li>
+<li><p>What role do unique indexes play here?
+Answer: enforce business uniqueness under concurrency (vendor name, bill/payment idempotency).
+Trap: Can app-only checks replace indexes?
+Confident: no, only DB uniqueness is race-safe.</p>
+</li>
+<li><p>Why use strict env validation on startup?
+Answer: fail fast against unsafe prod misconfiguration.
+Trap: Too strict?
+Confident: strictness is intentional for security-critical settings.</p>
+</li>
+<li><p>How would you scale this backend?
+Answer: statelessize shared state (queue/rate limit/metrics), add cache/queue infra, tune DB pooling.
+Trap: First bottleneck?
+Confident: parser queue and DB connection contention.</p>
+</li>
+<li><p>How do you ensure mobile secrets are safe?
+Answer: do not place secrets in <code>EXPO_PUBLIC_*</code>; keep server-only keys backend-side.
+Trap: Any violations now?
+Confident: yes, hygiene issue exists in env example/local credentials and must be fixed.</p>
+</li>
+<li><p>Why are there both route tests and utility tests?
+Answer: utility tests guard pure logic; integration tests guard route behavior and contracts.
+Trap: What is missing?
+Confident: UI integration tests and true DB-backed integration in CI are still limited.</p>
+</li>
+<li><p>How is graceful shutdown handled?
+Answer: stop accepting connections, stop alert loop, close DB pool, exit.
+Trap: Any data-loss concern?
+Confident: in-memory parser jobs/metrics can be lost; durable infra needed.</p>
+</li>
+<li><p>How does CORS work in production?
+Answer: explicit origins enforced by env validation, wildcard disallowed in production.
+Trap: If CORS misconfigured?
+Confident: startup fails fast in production.</p>
+</li>
+<li><p>Explain one major tradeoff you intentionally made.
+Answer: prioritized shipping speed with in-memory parser queue vs operational durability.
+Trap: Would you keep it now?
+Confident: no, now replace with durable queue for production scale.</p>
+</li>
+<li><p>What is your highest-priority fix list before enterprise production?
+Answer: secret hygiene, durable queue, deletion sync strategy, test expansion, route refactor.
+Trap: Order and why?
+Confident: security first, then data consistency, then scalability/maintainability.</p>
+</li>
+</ol>
+<h3>Weak areas you should strengthen before interviews</h3>
+<ol>
+<li>Distributed systems implications of in-memory state.</li>
+<li>Mobile multi-device sync conflict/tombstone design.</li>
+<li>Deep Postgres transaction/isolation behavior.</li>
+<li>Security operations (key management, credential lifecycle).</li>
+<li>Test strategy layering (unit/integration/e2e contract).</li>
+</ol>
+<hr>
+<h2>CODE QUALITY REVIEW</h2>
+<h3>Level assessment</h3>
+<ul>
+<li>Overall: mid-level to upper-mid.</li>
+<li>Why:<ul>
+<li>Strong: env validation, SQL constraints, idempotency, audit logging, observability hooks.</li>
+<li>Weak: oversized route files, some architecture drift, secret hygiene mistakes, incomplete sync model.</li>
+</ul>
+</li>
+</ul>
+<h3>Refactoring suggestions</h3>
+<ol>
+<li>Split <code>backend/src/routes/bills.ts</code> into <code>billController + billService + billRepository</code>.</li>
+<li>Create reusable query modules for analytics and payment guards.</li>
+<li>Introduce API contract types shared between backend and mobile.</li>
+<li>Implement sync engine module with explicit delete tombstones/version vectors.</li>
+<li>Add dedicated parser worker service if parse volume grows.</li>
+</ol>
+<h3>Design pattern suggestions</h3>
+<ul>
+<li>Use repository pattern for DB access.</li>
+<li>Use command handlers for mutable actions (create payment, delete bill, etc.).</li>
+<li>Use policy/guard layer for financial and auth business rules.</li>
+</ul>
+<h3>Clean code violations</h3>
+<ul>
+<li>Some files too large and multi-purpose.</li>
+<li>Repeated SQL snippets and repeated mapping logic.</li>
+<li>Mixed concerns in mobile screens (UI + orchestration + validation + error handling).</li>
+</ul>
+<h3>SOLID analysis (quick)</h3>
+<ul>
+<li>S: partially violated in big route files and scan screen.</li>
+<li>O: moderate; adding new entity requires touching many layers manually.</li>
+<li>L: N/A mostly functional modules.</li>
+<li>I: mostly fine (small helper interfaces).</li>
+<li>D: moderate; many modules depend directly on concrete services instead of abstractions.</li>
+</ul>
+<hr>
+<h2>PRODUCTION READINESS SCORE</h2>
+<p>Score: 6.5 / 10</p>
+<h3>Why not higher</h3>
+<ul>
+<li>Secret hygiene problems are serious.</li>
+<li>In-memory queue/metrics/rate-limit do not scale cleanly.</li>
+<li>Incremental sync deletion gap can create data inconsistency across devices.</li>
+</ul>
+<h3>Why not lower</h3>
+<ul>
+<li>Core transactional integrity is better than typical junior projects.</li>
+<li>Good use of validation, indexes, audit trail, health/metrics, CI + synthetic monitoring.</li>
+<li>Typecheck/tests currently pass.</li>
+</ul>
+<hr>
+<h2>Brutally Honest Priority Fixes (Top 10)</h2>
+<ol>
+<li>Remove OCR key from tracked <code>.env.example</code> and rotate key.</li>
+<li>Remove plaintext <code>mobile/credentials.json</code> from shared working tree usage; migrate to secure credential management.</li>
+<li>Add tombstone/deletion sync mechanism.</li>
+<li>Replace in-memory parser queue with durable shared queue.</li>
+<li>Replace in-memory rate-limit/metrics for scaled deployments.</li>
+<li>Refactor <code>bills.ts</code> into layered modules.</li>
+<li>Add true DB-backed integration tests in CI for key financial flows.</li>
+<li>Add mobile UI integration tests for login/scan/payment critical path.</li>
+<li>Align docs with actual auth persistence behavior.</li>
+<li>Add security policy docs (key rotation, incident handling, credential handling).</li>
+</ol>
+
+    </article>
+  </main>
+</body>
+</html>
