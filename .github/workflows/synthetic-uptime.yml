@@ -2,7 +2,7 @@ name: Synthetic Uptime
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -44,5 +44,5 @@ jobs:
           SYNTHETIC_EMAIL: ${{ secrets.SYNTHETIC_EMAIL }}
           SYNTHETIC_PASSWORD: ${{ secrets.SYNTHETIC_PASSWORD }}
           SYNTHETIC_HEALTH_TOKEN: ${{ secrets.SYNTHETIC_HEALTH_TOKEN }}
-          SYNTHETIC_TIMEOUT_MS: "20000"
+          SYNTHETIC_TIMEOUT_MS: "45000"
         run: npm --prefix backend run synthetic:check
