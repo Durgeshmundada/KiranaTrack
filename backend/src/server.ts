@@ -18,6 +18,8 @@ import { billsRouter } from './routes/bills';
 import { outOfStockRouter } from './routes/outofstock';
 import { parseRouter } from './routes/parse';
 import { paymentsRouter } from './routes/payments';
+import { publicPagesRouter } from './routes/publicPages';
+import { razorpayWebhookRouter } from './routes/razorpayWebhook';
 import { udhaarRouter } from './routes/udhaar';
 import { vendorsRouter } from './routes/vendors';
 import { errorMiddleware } from './utils/http';
@@ -91,6 +93,12 @@ app.use(
 );
 app.use(helmet());
 app.use(compression());
+app.use(publicPagesRouter);
+app.use(
+  '/api/webhooks',
+  express.raw({ type: 'application/json', limit: '100kb' }),
+  razorpayWebhookRouter,
+);
 app.use('/api/parse', express.json({ limit: '2mb' }));
 app.use(express.json({ limit: '100kb' }));
 app.use(authMiddleware);

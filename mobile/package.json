@@ -20,6 +20,7 @@
     "@supabase/supabase-js": "^2.97.0",
     "date-fns": "^4.1.0",
     "expo": "~54.0.33",
+    "expo-auth-session": "~7.0.10",
     "expo-blur": "^15.0.8",
     "expo-camera": "^17.0.10",
     "expo-constants": "~18.0.13",

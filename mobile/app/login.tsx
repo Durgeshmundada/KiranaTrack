@@ -1,7 +1,10 @@
-import { Feather } from '@expo/vector-icons';
+import { AntDesign, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Redirect } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState } from 'react';
+
+WebBrowser.maybeCompleteAuthSession();
 import {
   Alert,
   KeyboardAvoidingView,
@@ -51,6 +54,7 @@ export default function LoginScreen() {
   const loading = useAuthStore((state) => state.loading);
   const signIn = useAuthStore((state) => state.signIn);
   const signUp = useAuthStore((state) => state.signUp);
+  const signInWithGoogle = useAuthStore((state) => state.signInWithGoogle);
 
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
@@ -67,6 +71,16 @@ export default function LoginScreen() {
   if (session) {
     return <Redirect href="/home" />;
   }
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Google sign-in failed. Please try again.';
+      Alert.alert('Google sign-in failed', message);
+    }
+  };
 
   const submit = async () => {
     const normalizedEmail = email.trim().toLowerCase();
@@ -195,6 +209,24 @@ export default function LoginScreen() {
 
           <GradientButton label={buttonLabel} onPress={submit} disabled={loading} />
 
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <AppText variant="caption" style={styles.dividerText}>
+              OR
+            </AppText>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <Pressable
+            style={styles.googleBtn}
+            onPress={handleGoogleSignIn}
+            disabled={loading}>
+            <AntDesign name="google" size={18} color="#E2E8F0" />
+            <AppText variant="label" style={styles.googleLabel}>
+              Continue with Google
+            </AppText>
+          </Pressable>
+
           <AppText variant="caption" style={styles.helper}>
             {mode === 'signin'
               ? 'Use the same account on family devices for shared records.'
@@ -306,6 +338,34 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     fontFamily: typography.body,
     fontSize: 15,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  dividerText: {
+    color: '#7E96B6',
+  },
+  googleBtn: {
+    minHeight: 50,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+  },
+  googleLabel: {
+    color: '#E2E8F0',
   },
   helper: {
     textAlign: 'center',

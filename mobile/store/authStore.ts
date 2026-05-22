@@ -1,4 +1,6 @@
 import type { Session, User } from '@supabase/supabase-js';
+import { makeRedirectUri } from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import { create } from 'zustand';
 
 import { type BackendAuthSession, signInWithBackend, signUpWithBackend } from '@/services/backendAuth';
@@ -18,6 +20,7 @@ interface AuthState {
   initialize: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -156,6 +159,26 @@ const shouldFallbackToBackendAuth = (error: unknown): boolean => {
   return true;
 };
 
+const isInvalidRefreshTokenError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const normalized = error.message.toLowerCase();
+  return (
+    normalized.includes('invalid refresh token') ||
+    normalized.includes('refresh token not found') ||
+    normalized.includes('already used')
+  );
+};
+
+const clearStaleSupabaseSession = async (): Promise<void> => {
+  setManualAccessToken(null, null);
+  if (isSupabaseConfigured) {
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+  }
+};
+
 const applyPersistedBackendSession = async (
   backendSession: BackendAuthSession,
   set: (partial: Partial<AuthState>) => void,
@@ -243,6 +266,12 @@ export const useAuthStore = create<AuthState>()((set) => ({
       error = sessionError;
     }
 
+    if (isInvalidRefreshTokenError(error)) {
+      await clearStaleSupabaseSession();
+      error = null;
+      data = null;
+    }
+
     const activeSupabaseSession = error ? null : (data?.session ?? null);
     if (activeSupabaseSession) {
       await applySupabaseSession(activeSupabaseSession, set);
@@ -303,6 +332,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
           return;
         } catch (supabaseError) {
           if (!shouldFallbackToBackendAuth(supabaseError)) {
+            if (isInvalidRefreshTokenError(supabaseError)) {
+              await clearStaleSupabaseSession();
+            }
             throw supabaseError;
           }
           // Fall back to backend-auth bridge only when direct Supabase sign-in fails.
@@ -386,6 +418,58 @@ export const useAuthStore = create<AuthState>()((set) => ({
           })
           .catch(() => {});
       }
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  signInWithGoogle: async () => {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase must be configured for Google sign-in.');
+    }
+
+    set({ loading: true });
+
+    try {
+      const redirectTo = makeRedirectUri();
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error || !data.url) {
+        throw error ?? new Error('Failed to start Google sign-in');
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+      if (result.type !== 'success') {
+        return; // User cancelled
+      }
+
+      const url = new URL(result.url);
+      const params = new URLSearchParams(url.hash.substring(1));
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (!accessToken || !refreshToken) {
+        throw new Error('No session returned from Google sign-in');
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      // Session is picked up by the onAuthStateChange listener
     } finally {
       set({ loading: false });
     }

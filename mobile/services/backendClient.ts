@@ -219,6 +219,17 @@ const tryRefreshAuthHeader = async (): Promise<Record<string, string> | null> =>
       : undefined,
   );
   if (error) {
+    const normalized = error.message.toLowerCase();
+    if (
+      normalized.includes('invalid refresh token') ||
+      normalized.includes('refresh token not found') ||
+      normalized.includes('already used')
+    ) {
+      cachedAccessToken = null;
+      manualAccessToken = null;
+      manualRefreshToken = null;
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    }
     return null;
   }
 

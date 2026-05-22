@@ -89,6 +89,13 @@ interface RawUdhaarCustomer {
   updatedAt: string;
 }
 
+export interface UdhaarPaymentLink {
+  paymentLinkId: string;
+  shortUrl: string;
+  amountPaise: number;
+  status: string;
+}
+
 interface PaginatedApiData<T> {
   items: T[];
   page: number;
@@ -518,4 +525,17 @@ export const deleteUdhaarEntry = async (
     method: 'DELETE',
   });
   return response.data.customer ? toUdhaarCustomer(response.data.customer) : null;
+};
+
+export const createUdhaarPaymentLink = async (
+  customerId: string,
+): Promise<UdhaarPaymentLink> => {
+  const response = await authApiRequest<ApiEnvelope<UdhaarPaymentLink>>(
+    `/api/udhaar/${customerId}/payment-link`,
+    {
+      method: 'POST',
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
 };

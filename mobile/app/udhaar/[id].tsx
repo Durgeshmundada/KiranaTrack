@@ -1,6 +1,7 @@
+import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, Linking, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
@@ -9,6 +10,7 @@ import { GlassCard } from '@/components/ui/GlassCard';
 import { GradientButton } from '@/components/ui/GradientButton';
 import { PinOverlay } from '@/components/ui/PinOverlay';
 import { t } from '@/i18n';
+import { createUdhaarPaymentLink, type UdhaarPaymentLink } from '@/services/backendData';
 import { useAppStore } from '@/store/appStore';
 import { customerBalancePaise } from '@/store/selectors';
 import { radii, typography } from '@/theme/tokens';
@@ -45,8 +47,15 @@ export default function UdhaarDetailScreen() {
   const [showPin, setShowPin] = useState(false);
   const [savingEntry, setSavingEntry] = useState(false);
   const [deletingEntry, setDeletingEntry] = useState(false);
+  const [paymentLink, setPaymentLink] = useState<UdhaarPaymentLink | null>(null);
+  const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
+  const [sharingPaymentLink, setSharingPaymentLink] = useState(false);
 
   const customer = useMemo(() => customers.find((item) => item.id === id), [customers, id]);
+
+  useEffect(() => {
+    setPaymentLink(null);
+  }, [id]);
 
   if (!customer) {
     return (
@@ -67,6 +76,72 @@ export default function UdhaarDetailScreen() {
     .filter((entry) => entry.type === 'repayment')
     .reduce((sum, entry) => sum + entry.amountPaise, 0);
   const balance = customerBalancePaise(customer);
+
+  const getPaymentLink = async (): Promise<UdhaarPaymentLink | null> => {
+    if (balance <= 0) {
+      Alert.alert('Nothing to collect', 'This customer has no outstanding udhaar balance.');
+      return null;
+    }
+
+    if (!customer.phone) {
+      Alert.alert('Phone required', 'Add a customer phone number before collecting online payment.');
+      return null;
+    }
+
+    if (paymentLink?.amountPaise === balance) {
+      return paymentLink;
+    }
+
+    const createdLink = await createUdhaarPaymentLink(customer.id);
+    setPaymentLink(createdLink);
+    return createdLink;
+  };
+
+  const collectPayment = async () => {
+    if (creatingPaymentLink) {
+      return;
+    }
+
+    try {
+      setCreatingPaymentLink(true);
+      const link = await getPaymentLink();
+      if (!link) {
+        return;
+      }
+      await Linking.openURL(link.shortUrl);
+    } catch (error) {
+      Alert.alert(
+        'Payment link failed',
+        resolveUserErrorMessage(error, 'Could not create or open payment link. Please try again.'),
+      );
+    } finally {
+      setCreatingPaymentLink(false);
+    }
+  };
+
+  const sharePaymentLinkViaWhatsApp = async () => {
+    if (sharingPaymentLink) {
+      return;
+    }
+
+    try {
+      setSharingPaymentLink(true);
+      const link = await getPaymentLink();
+      if (!link) {
+        return;
+      }
+
+      const message = `Please pay ${formatINRFromPaise(link.amountPaise)} for your KiranaTrack udhaar: ${link.shortUrl}`;
+      await Linking.openURL(`whatsapp://send?text=${encodeURIComponent(message)}`);
+    } catch (error) {
+      Alert.alert(
+        'WhatsApp share failed',
+        resolveUserErrorMessage(error, 'Could not open WhatsApp with the payment link.'),
+      );
+    } finally {
+      setSharingPaymentLink(false);
+    }
+  };
 
   const openForm = (type: UdhaarEntryType) => {
     setAmount('');
@@ -178,6 +253,19 @@ export default function UdhaarDetailScreen() {
       </GlassCard>
 
       <View style={styles.ctaRow}>
+        <GradientButton
+          label={creatingPaymentLink ? 'Opening...' : 'Collect Payment'}
+          onPress={collectPayment}
+          disabled={creatingPaymentLink || sharingPaymentLink || balance <= 0}
+          icon={<Feather name="external-link" size={16} color="#0B1120" />}
+        />
+        <GradientButton
+          label={sharingPaymentLink ? 'Opening WhatsApp...' : 'Share Link via WhatsApp'}
+          onPress={sharePaymentLinkViaWhatsApp}
+          disabled={creatingPaymentLink || sharingPaymentLink || balance <= 0}
+          variant="accent"
+          icon={<Feather name="send" size={16} color="#0B1120" />}
+        />
         <GradientButton label={t('addCredit')} onPress={() => openForm('credit')} />
         <GradientButton
           label={t('addRepayment')}

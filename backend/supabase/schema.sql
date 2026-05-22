@@ -88,6 +88,23 @@ create table if not exists public.udhaar_entries (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.razorpay_udhaar_payment_links (
+  id text primary key,
+  reference_id text not null unique,
+  owner_user_id text not null,
+  customer_id text not null references public.udhaar_customers(id) on delete restrict,
+  amount_paise integer not null check (amount_paise > 0),
+  amount_paid_paise integer not null default 0 check (amount_paid_paise >= 0),
+  short_url text not null,
+  status text not null check (status in ('created', 'paid', 'cancelled', 'expired', 'failed')),
+  razorpay_payment_id text,
+  webhook_event_id text,
+  repayment_entry_id text references public.udhaar_entries(id) on delete restrict,
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.audit_events (
   id text primary key check (id ~ '^[0-9a-f]{24}$'),
   owner_user_id text not null,
@@ -169,6 +186,10 @@ create index if not exists idx_udhaar_entries_customer_date on public.udhaar_ent
 create index if not exists idx_udhaar_entries_customer_date_active
   on public.udhaar_entries (customer_id, date desc)
   where deleted_at is null;
+create index if not exists idx_razorpay_udhaar_links_customer_status
+  on public.razorpay_udhaar_payment_links (customer_id, status, created_at desc);
+create index if not exists idx_razorpay_udhaar_links_owner_created
+  on public.razorpay_udhaar_payment_links (owner_user_id, created_at desc);
 create index if not exists idx_audit_owner_created on public.audit_events (owner_user_id, created_at desc);
 create index if not exists idx_audit_entity on public.audit_events (entity_type, entity_id, created_at desc);
 

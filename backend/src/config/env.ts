@@ -68,6 +68,9 @@ const envSchema = z.object({
   ALERT_MIN_REQUESTS: z.coerce.number().int().min(1).max(10_000).default(30),
   AUTH_SIGNUP_ENABLED: z.coerce.boolean().default(false),
   GROQ_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
+  RAZORPAY_KEY_ID: z.preprocess(emptyToUndefined, z.string().optional()),
+  RAZORPAY_KEY_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
+  RAZORPAY_WEBHOOK_SECRET: z.preprocess(emptyToUndefined, z.string().optional()),
   PARSER_QUEUE_ENABLED: z.coerce.boolean().default(true),
   PARSER_QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(2),
   PARSER_QUEUE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(3),
@@ -124,6 +127,20 @@ if (envData.NODE_ENV === 'production' && !envData.SUPABASE_JWT_SECRET) {
 
 if (envData.NODE_ENV === 'production' && resolvedCorsOrigin === '*') {
   throw new Error('Invalid environment configuration: CORS_ORIGIN must be explicit in production');
+}
+
+const hasAnyRazorpayEnv =
+  Boolean(envData.RAZORPAY_KEY_ID) ||
+  Boolean(envData.RAZORPAY_KEY_SECRET) ||
+  Boolean(envData.RAZORPAY_WEBHOOK_SECRET);
+
+if (
+  hasAnyRazorpayEnv &&
+  (!envData.RAZORPAY_KEY_ID || !envData.RAZORPAY_KEY_SECRET || !envData.RAZORPAY_WEBHOOK_SECRET)
+) {
+  throw new Error(
+    'Invalid environment configuration: set RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, and RAZORPAY_WEBHOOK_SECRET together',
+  );
 }
 
 export const env = {

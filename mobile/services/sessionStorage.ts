@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 let secureStoreSupportPromise: Promise<boolean> | null = null;
+const SECURE_STORE_VALUE_LIMIT = 1900;
 
 const isSecureStoreSupported = async (): Promise<boolean> => {
   if (!secureStoreSupportPromise) {
@@ -63,7 +64,7 @@ export const setSessionStorageItem = async (
 ): Promise<void> => {
   const secureStoreSupported = await isSecureStoreSupported();
 
-  if (secureStoreSupported) {
+  if (secureStoreSupported && value.length <= SECURE_STORE_VALUE_LIMIT) {
     try {
       await SecureStore.setItemAsync(key, value);
       await removeFromFallbackStorage(key).catch(() => {});
@@ -71,6 +72,10 @@ export const setSessionStorageItem = async (
     } catch {
       // Fall through to AsyncStorage fallback.
     }
+  }
+
+  if (secureStoreSupported) {
+    await SecureStore.deleteItemAsync(key).catch(() => {});
   }
 
   await writeToFallbackStorage(key, value);
