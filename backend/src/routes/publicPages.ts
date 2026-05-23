@@ -8,8 +8,11 @@ type PublicPage = {
 
 const publicPagesRouter = Router();
 const supportEmail = 'mundadadurgesh@gmail.com';
+const appDownloadUrl = 'https://expo.dev/artifacts/eas/fsMz585vTH36FNtPxgG2nm.apk';
+const appDownloadExpiresLabel = 'June 6, 2026';
 const siteLinks = [
   { href: '/', label: 'Home' },
+  { href: '/download', label: 'Download App' },
   { href: '/about-us', label: 'About Us' },
   { href: '/contact-us', label: 'Contact Us' },
   { href: '/privacy-policy', label: 'Privacy Policy' },
@@ -104,6 +107,18 @@ const shell = (page: PublicPage): string => `<!doctype html>
       a {
         color: var(--accent);
       }
+      .button-link {
+        display: inline-block;
+        background: var(--accent);
+        color: #ffffff;
+        border-radius: 6px;
+        padding: 10px 14px;
+        text-decoration: none;
+        font-weight: 700;
+      }
+      .meta {
+        font-size: 14px;
+      }
       .notice {
         border-left: 4px solid var(--accent);
         background: #eff6ff;
@@ -147,6 +162,10 @@ const shell = (page: PublicPage): string => `<!doctype html>
 
 const render = (page: PublicPage): string => shell(page);
 
+publicPagesRouter.get('/download', (_req, res) => {
+  res.redirect(302, appDownloadUrl);
+});
+
 publicPagesRouter.get('/', (_req, res) => {
   res.type('html').send(
     render({
@@ -156,9 +175,14 @@ publicPagesRouter.get('/', (_req, res) => {
         <h1>KiranaTrack</h1>
         <p>KiranaTrack is a mobile application for kirana stores and small retailers to manage supplier bills, customer udhaar, repayments, out-of-stock items, and business analytics.</p>
         <p>The app helps merchants maintain digital records and collect customer udhaar through secure Razorpay payment links.</p>
+        <h2>Download the App</h2>
+        <p>Install the current Android preview APK for KiranaTrack.</p>
+        <p><a class="button-link" href="/download">Download Android APK</a></p>
+        <p class="meta">This internal testing download link is valid until ${appDownloadExpiresLabel}.</p>
         <div class="notice">Use this website to review KiranaTrack app information, contact details, privacy policy, terms, and cancellation/refund policies.</div>
         <h2>Important Pages</h2>
         <ul>
+          <li><a href="/download">Download App</a></li>
           <li><a href="/about-us">About Us</a></li>
           <li><a href="/contact-us">Contact Us</a></li>
           <li><a href="/privacy-policy">Privacy Policy</a></li>
@@ -201,6 +225,8 @@ publicPagesRouter.get(['/contact-us', '/contact'], (_req, res) => {
         <p>For product support, payment questions, refund requests, account help, or policy questions, contact KiranaTrack support.</p>
         <h2>Support Email</h2>
         <p><a href="mailto:${supportEmail}">${supportEmail}</a></p>
+        <h2>App Download</h2>
+        <p><a href="/download">Download the current Android APK</a></p>
         <h2>Response Time</h2>
         <p>We usually respond within 2 business days.</p>
         <h2>App Name</h2>
