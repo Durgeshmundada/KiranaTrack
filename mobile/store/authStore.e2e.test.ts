@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sessionStorageMap = new Map<string, string>();
 
+vi.mock('expo-auth-session', () => ({
+  makeRedirectUri: vi.fn(() => 'kiranatrack://auth'),
+}));
+
+vi.mock('expo-web-browser', () => ({
+  openAuthSessionAsync: vi.fn(),
+}));
+
 vi.mock('@/services/sessionStorage', () => ({
   getSessionStorageItem: vi.fn(async (key: string) => sessionStorageMap.get(key) ?? null),
   setSessionStorageItem: vi.fn(async (key: string, value: string) => {
