@@ -15,6 +15,7 @@ import {
 import { PaymentEntry } from '@/components/bill/PaymentEntry';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { AppText } from '@/components/ui/AppText';
 import { BalanceBar } from '@/components/ui/BalanceBar';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -54,6 +55,7 @@ export default function BillDetailScreen() {
   const deletePayment = useAppStore((state) => state.deletePayment);
   const deleteBill = useAppStore((state) => state.deleteBill);
   const syncAll = useAppStore((state) => state.syncAll);
+  const subscription = useAppStore((state) => state.subscription);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -101,6 +103,14 @@ export default function BillDetailScreen() {
   };
 
   const openAddModal = () => {
+    if (!subscription?.canUseFeatures) {
+      Alert.alert(
+        subscription?.alertTitle ?? 'Subscription required',
+        subscription?.alertMessage ??
+          'Set up Rs 1/month auto pay to unlock editing features.',
+      );
+      return;
+    }
     resetPaymentForm();
     setPaymentRequestId(generateClientRequestId('payment'));
     setShowAddModal(true);
@@ -246,6 +256,15 @@ export default function BillDetailScreen() {
   };
 
   const requestSecureAction = async (action: PendingAction) => {
+    if (!subscription?.canUseFeatures) {
+      Alert.alert(
+        subscription?.alertTitle ?? 'Subscription required',
+        subscription?.alertMessage ??
+          'Set up Rs 1/month auto pay to unlock editing features.',
+      );
+      return;
+    }
+
     const pinExists = await hasPin();
     if (!pinExists) {
       Alert.alert(
@@ -325,6 +344,7 @@ export default function BillDetailScreen() {
         title={t('billDetails')}
         subtitle={`${bill.billNumber} | ${formatDisplayDate(bill.date)}`}
       />
+      <SubscriptionNotice />
 
       <GlassCard intense style={styles.heroCard}>
         <Image source={{ uri: bill.imageUrl }} style={styles.image} resizeMode="cover" />

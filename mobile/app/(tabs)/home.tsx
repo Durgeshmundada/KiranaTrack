@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
@@ -9,6 +9,7 @@ import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { GradientButton } from '@/components/ui/GradientButton';
 import { MetricCard } from '@/components/ui/MetricCard';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { t } from '@/i18n';
 import { dashboardSummary, recentPayments, resolveVendor, totalsForCustomers, withComputedStatus } from '@/store/selectors';
 import { gradients, palette } from '@/theme/tokens';
@@ -23,6 +24,7 @@ export default function HomeDashboardScreen() {
   const outOfStockItems = useAppStore((state) => state.outOfStockItems);
   const settings = useAppStore((state) => state.settings);
   const isOffline = useAppStore((state) => state.isOffline);
+  const subscription = useAppStore((state) => state.subscription);
 
   const pendingNotepadCount = outOfStockItems.filter((item) => item.status === 'pending').length;
   const summary = dashboardSummary(bills, settings.overdueThresholdDays, pendingNotepadCount);
@@ -35,6 +37,18 @@ export default function HomeDashboardScreen() {
     .sort((a, b) => b.remainingPaise - a.remainingPaise);
 
   const activities = recentPayments(bills, vendors);
+  const openScan = () => {
+    if (!subscription?.canUseFeatures) {
+      Alert.alert(
+        subscription?.alertTitle ?? 'Subscription required',
+        subscription?.alertMessage ??
+          'Set up Rs 1/month auto pay to unlock editing features.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    router.push('/scan');
+  };
 
   return (
     <ScreenContainer contentStyle={styles.content}>
@@ -48,6 +62,16 @@ export default function HomeDashboardScreen() {
           </Pressable>
         }
       />
+
+      <View style={styles.brandBannerWrap}>
+        <Image
+          source={require('@/assets/images/brand-wordmark.png')}
+          style={styles.brandBanner}
+          resizeMode="contain"
+        />
+      </View>
+
+      <SubscriptionNotice />
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.metricsRow}>
         <MetricCard
@@ -120,7 +144,7 @@ export default function HomeDashboardScreen() {
       <View style={styles.fabWrap}>
         <GradientButton
           label={t('scanNewBill')}
-          onPress={() => router.push('/scan')}
+          onPress={openScan}
           icon={<Feather name="camera" size={16} color="#0B1120" />}
         />
       </View>
@@ -142,6 +166,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  brandBannerWrap: {
+    height: 112,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#FFFFFF',
+  },
+  brandBanner: {
+    width: '100%',
+    height: '100%',
   },
   metricsRow: {
     gap: 12,

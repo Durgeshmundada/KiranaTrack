@@ -7,7 +7,7 @@ import { router, Stack, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { Alert, AppState, type AppStateStatus } from 'react-native';
 import 'react-native-reanimated';
 
 import { PinOverlay } from '@/components/ui/PinOverlay';
@@ -35,6 +35,7 @@ export default function RootLayout() {
   const resetData = useAppStore((state) => state.resetData);
   const setOffline = useAppStore((state) => state.setOffline);
   const syncAll = useAppStore((state) => state.syncAll);
+  const subscription = useAppStore((state) => state.subscription);
   const lockOnOpen = useAppStore((state) => state.settings.lockOnOpen);
   const dataOwnerUserId = useAppStore((state) => state.ownerUserId);
   const authReady = useAuthStore((state) => state.ready);
@@ -47,6 +48,7 @@ export default function RootLayout() {
   const launchRedirectHandledRef = useRef(false);
   const previousAuthUserRef = useRef<string | null>(null);
   const previousOnlineRef = useRef<boolean | null>(null);
+  const subscriptionAlertKeyRef = useRef<string | null>(null);
 
   const [loaded, error] = useFonts({
     Syne_600SemiBold,
@@ -184,6 +186,27 @@ export default function RootLayout() {
 
     return () => subscription.remove();
   }, [authUserId, lockOnOpen]);
+
+  useEffect(() => {
+    if (!authUserId || !subscription || subscription.canUseFeatures) {
+      return;
+    }
+
+    if (pathname === '/' || pathname === '/index' || pathname.startsWith('/login')) {
+      return;
+    }
+
+    const alertKey = `${subscription.accessStatus}:${subscription.currentEnd ?? 'none'}:${subscription.razorpaySubscriptionId ?? 'none'}`;
+    if (subscriptionAlertKeyRef.current === alertKey) {
+      return;
+    }
+
+    subscriptionAlertKeyRef.current = alertKey;
+    Alert.alert(subscription.alertTitle, subscription.alertMessage, [
+      { text: 'View Only', style: 'cancel' },
+      { text: 'Set Auto Pay', onPress: () => router.push('/settings' as never) },
+    ]);
+  }, [authUserId, pathname, subscription]);
 
   if (!loaded || !authReady) {
     return null;

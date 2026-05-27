@@ -6,6 +6,10 @@ import { dbQuery, withTransaction } from '../db/postgres';
 import { logWarn } from '../observability/logger';
 import { recordAuditEvent } from '../services/audit';
 import { getRazorpayWebhookSecret } from '../services/razorpay';
+import {
+  handleRazorpaySubscriptionWebhook,
+  type RazorpaySubscriptionWebhookPayload,
+} from '../services/subscription';
 import { asyncHandler } from '../utils/asyncHandler';
 import { HttpError, sendOk } from '../utils/http';
 
@@ -71,6 +75,19 @@ razorpayWebhookRouter.post(
     }
 
     const payload = JSON.parse(rawBody) as RazorpayWebhookPayload;
+    const eventId = req.header('x-razorpay-event-id') ?? null;
+
+    if (typeof payload.event === 'string' && payload.event.startsWith('subscription.')) {
+      sendOk(
+        res,
+        await handleRazorpaySubscriptionWebhook(
+          payload as RazorpaySubscriptionWebhookPayload,
+          eventId,
+        ),
+      );
+      return;
+    }
+
     if (payload.event !== 'payment_link.paid') {
       sendOk(res, { ignored: true });
       return;
@@ -82,7 +99,6 @@ razorpayWebhookRouter.post(
       throw new HttpError(400, 'Missing Razorpay payment link id');
     }
 
-    const eventId = req.header('x-razorpay-event-id') ?? null;
     const razorpayPaymentId =
       typeof payload.payload?.payment?.entity?.id === 'string'
         ? payload.payload.payment.entity.id

@@ -9,6 +9,7 @@ import type { Server } from 'node:http';
 import { env } from './config/env';
 import { closeDatabase, connectDatabase, getDatabaseState } from './db/postgres';
 import { authMiddleware } from './middleware/auth';
+import { subscriptionWriteGuard } from './middleware/subscription';
 import { startAlertLoop, stopAlertLoop } from './observability/alerts';
 import { logError, logInfo, logWarn } from './observability/logger';
 import { recordHttpRequestMetric, renderPrometheusMetrics } from './observability/metrics';
@@ -20,6 +21,7 @@ import { parseRouter } from './routes/parse';
 import { paymentsRouter } from './routes/payments';
 import { publicPagesRouter } from './routes/publicPages';
 import { razorpayWebhookRouter } from './routes/razorpayWebhook';
+import { subscriptionRouter } from './routes/subscription';
 import { udhaarRouter } from './routes/udhaar';
 import { vendorsRouter } from './routes/vendors';
 import { errorMiddleware } from './utils/http';
@@ -186,6 +188,8 @@ app.use(
   }),
   authRouter,
 );
+app.use('/api/subscription', subscriptionRouter);
+app.use(subscriptionWriteGuard);
 app.use('/api/bills', billsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/vendors', vendorsRouter);

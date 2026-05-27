@@ -1,6 +1,7 @@
 import { authApiRequest } from '@/services/backendClient';
 import type {
   Bill,
+  AppSubscriptionStatus,
   OutOfStockItem,
   Payment,
   UdhaarCustomer,
@@ -87,13 +88,6 @@ interface RawUdhaarCustomer {
   entries: RawUdhaarEntry[];
   createdAt: string;
   updatedAt: string;
-}
-
-export interface UdhaarPaymentLink {
-  paymentLinkId: string;
-  shortUrl: string;
-  amountPaise: number;
-  status: string;
 }
 
 interface PaginatedApiData<T> {
@@ -527,11 +521,41 @@ export const deleteUdhaarEntry = async (
   return response.data.customer ? toUdhaarCustomer(response.data.customer) : null;
 };
 
-export const createUdhaarPaymentLink = async (
-  customerId: string,
-): Promise<UdhaarPaymentLink> => {
-  const response = await authApiRequest<ApiEnvelope<UdhaarPaymentLink>>(
-    `/api/udhaar/${customerId}/payment-link`,
+export const fetchSubscriptionStatus = async (): Promise<AppSubscriptionStatus> => {
+  const response = await authApiRequest<ApiEnvelope<AppSubscriptionStatus>>(
+    '/api/subscription/status',
+    {
+      method: 'GET',
+    },
+  );
+  return response.data;
+};
+
+export const startSubscription = async (): Promise<AppSubscriptionStatus> => {
+  const response = await authApiRequest<ApiEnvelope<AppSubscriptionStatus>>(
+    '/api/subscription/start',
+    {
+      method: 'POST',
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+};
+
+export const refreshSubscription = async (): Promise<AppSubscriptionStatus> => {
+  const response = await authApiRequest<ApiEnvelope<AppSubscriptionStatus>>(
+    '/api/subscription/refresh',
+    {
+      method: 'POST',
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+};
+
+export const cancelSubscription = async (): Promise<AppSubscriptionStatus> => {
+  const response = await authApiRequest<ApiEnvelope<AppSubscriptionStatus>>(
+    '/api/subscription/cancel',
     {
       method: 'POST',
       timeoutMs: 15000,

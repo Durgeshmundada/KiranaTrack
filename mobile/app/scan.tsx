@@ -6,6 +6,7 @@ import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { GradientButton } from '@/components/ui/GradientButton';
@@ -32,6 +33,7 @@ const paiseToInputRupees = (value: number): string => {
 
 export default function ScanBillScreen() {
   const addBill = useAppStore((state) => state.addBill);
+  const subscription = useAppStore((state) => state.subscription);
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
@@ -46,6 +48,16 @@ export default function ScanBillScreen() {
   const [parsedLineItems, setParsedLineItems] = useState<Bill['lineItems']>([]);
 
   const hasEditableDraft = Boolean(imageUri && vendorName && totalRupee);
+
+  if (!subscription?.canUseFeatures) {
+    return (
+      <ScreenContainer contentStyle={styles.frozenContent}>
+        <ScreenHeader title={t('scanNewBill')} subtitle="View-only mode" />
+        <SubscriptionNotice alwaysVisible />
+        <GradientButton label="Back" onPress={() => router.back()} />
+      </ScreenContainer>
+    );
+  }
 
   const pickFromGallery = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -310,6 +322,9 @@ export default function ScanBillScreen() {
 }
 
 const styles = StyleSheet.create({
+  frozenContent: {
+    gap: 12,
+  },
   captureCard: {
     gap: 12,
   },

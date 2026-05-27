@@ -4,6 +4,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 import {
   addPayment as addPaymentRemote,
+  cancelSubscription as cancelSubscriptionRemote,
   clearOutOfStockItems,
   createBill as createBillRemote,
   createOutOfStockItem,
@@ -17,14 +18,18 @@ import {
   editPayment as editPaymentRemote,
   fetchBillsWithPayments,
   fetchOutOfStockItems,
+  fetchSubscriptionStatus,
   fetchUdhaarCustomers,
   fetchVendors,
+  refreshSubscription as refreshSubscriptionRemote,
+  startSubscription as startSubscriptionRemote,
   updateOutOfStockStatus,
 } from '@/services/backendData';
 import { setAppLanguage } from '@/i18n';
 import type {
   AppLanguage,
   AppSettings,
+  AppSubscriptionStatus,
   Bill,
   OutOfStockItem,
   OutOfStockStatus,
@@ -85,11 +90,16 @@ interface AppStoreState {
   outOfStockItems: OutOfStockItem[];
   customers: UdhaarCustomer[];
   isOffline: boolean;
+  subscription: AppSubscriptionStatus | null;
+  subscriptionLoading: boolean;
 
   bootstrap: (ownerUserId: string) => Promise<void>;
   syncAll: () => Promise<void>;
   resetData: () => void;
   setOffline: (value: boolean) => void;
+  refreshSubscription: () => Promise<AppSubscriptionStatus | null>;
+  startSubscription: () => Promise<AppSubscriptionStatus>;
+  cancelSubscription: () => Promise<AppSubscriptionStatus>;
   setLanguage: (language: AppLanguage) => void;
   setOverdueThreshold: (days: number) => void;
   setDefaultPaymentMode: (mode: PaymentMode) => void;
@@ -126,6 +136,8 @@ interface AppStoreState {
 const normalize = (value: string): string => value.trim().toLowerCase();
 const OFFLINE_WRITE_ERROR = 'You are offline. Reconnect to internet and retry.';
 const FULL_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const SUBSCRIPTION_REQUIRED_ERROR =
+  'Set up Rs 1/month auto pay to unlock editing features. You can still view your account.';
 
 type WithVersion = {
   id: string;
@@ -190,6 +202,12 @@ const assertOnlineForWrite = (isOffline: boolean): void => {
   }
 };
 
+const assertSubscriptionForWrite = (subscription: AppSubscriptionStatus | null): void => {
+  if (!subscription?.canUseFeatures) {
+    throw new Error(subscription?.alertMessage || SUBSCRIPTION_REQUIRED_ERROR);
+  }
+};
+
 export const useAppStore = create<AppStoreState>()(
   persist(
     (set, get) => ({
@@ -210,6 +228,8 @@ export const useAppStore = create<AppStoreState>()(
       outOfStockItems: [],
       customers: [],
       isOffline: false,
+      subscription: null,
+      subscriptionLoading: false,
 
       bootstrap: async (ownerUserId) => {
         setAppLanguage(get().settings.language);
@@ -231,6 +251,7 @@ export const useAppStore = create<AppStoreState>()(
             bills: [],
             outOfStockItems: [],
             customers: [],
+            subscription: null,
           });
         }
 
@@ -268,13 +289,20 @@ export const useAppStore = create<AppStoreState>()(
             : current.syncCursor.customers ?? undefined;
 
           const results = await Promise.allSettled([
+            fetchSubscriptionStatus(),
             fetchVendors({ updatedAfter: vendorsUpdatedAfter }),
             fetchBillsWithPayments({ updatedAfter: billsUpdatedAfter }),
             fetchOutOfStockItems({ updatedAfter: outOfStockUpdatedAfter }),
             fetchUdhaarCustomers({ updatedAfter: customersUpdatedAfter }),
           ]);
 
-          const [vendorsResult, billsResult, outOfStockResult, customersResult] =
+          const [
+            subscriptionResult,
+            vendorsResult,
+            billsResult,
+            outOfStockResult,
+            customersResult,
+          ] =
             results;
 
           const vendors = (() => {
@@ -314,7 +342,12 @@ export const useAppStore = create<AppStoreState>()(
             return mergeByLatestVersion(current.customers, customersResult.value);
           })();
 
-          const successCount = results.filter(
+          const successCount = [
+            vendorsResult,
+            billsResult,
+            outOfStockResult,
+            customersResult,
+          ].filter(
             (result) => result.status === 'fulfilled',
           ).length;
 
@@ -338,6 +371,10 @@ export const useAppStore = create<AppStoreState>()(
             bills,
             outOfStockItems,
             customers,
+            subscription:
+              subscriptionResult.status === 'fulfilled'
+                ? subscriptionResult.value
+                : current.subscription,
             initialized: true,
             lastSyncAt: syncedAtIso,
             lastFullSyncAt: shouldRunFullSync
@@ -366,10 +403,45 @@ export const useAppStore = create<AppStoreState>()(
           bills: [],
           outOfStockItems: [],
           customers: [],
+          subscription: null,
+          subscriptionLoading: false,
         });
       },
 
       setOffline: (value) => set({ isOffline: value }),
+
+      refreshSubscription: async () => {
+        set({ subscriptionLoading: true });
+        try {
+          const subscription = await refreshSubscriptionRemote();
+          set({ subscription });
+          return subscription;
+        } finally {
+          set({ subscriptionLoading: false });
+        }
+      },
+
+      startSubscription: async () => {
+        set({ subscriptionLoading: true });
+        try {
+          const subscription = await startSubscriptionRemote();
+          set({ subscription });
+          return subscription;
+        } finally {
+          set({ subscriptionLoading: false });
+        }
+      },
+
+      cancelSubscription: async () => {
+        set({ subscriptionLoading: true });
+        try {
+          const subscription = await cancelSubscriptionRemote();
+          set({ subscription });
+          return subscription;
+        } finally {
+          set({ subscriptionLoading: false });
+        }
+      },
 
       setLanguage: (language) => {
         set((state) => ({ settings: { ...state.settings, language } }));
@@ -404,6 +476,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addBill: async (payload) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const state = get();
         const vendorNameNormalized = normalize(payload.vendorName);
@@ -456,6 +529,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deleteBill: async (billId) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         await deleteBillRemote(billId);
         set((state) => ({
@@ -466,6 +540,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addPayment: async (billId, payload) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const payment = await addPaymentRemote(billId, {
           amountPaise: payload.amountPaise,
@@ -494,6 +569,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       editPayment: async (billId, paymentId, payload) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const updatedPayment = await editPaymentRemote(paymentId, {
           amountPaise: payload.amountPaise,
@@ -520,6 +596,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deletePayment: async (billId, paymentId) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         await deletePaymentRemote(paymentId);
         set((state) => ({
@@ -538,6 +615,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addOutOfStockItem: async (name) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const trimmed = name.trim();
         if (!trimmed) {
@@ -556,6 +634,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       cycleOutOfStock: async (id) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const item = get().outOfStockItems.find((entry) => entry.id === id);
         if (!item) {
@@ -573,6 +652,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deleteOutOfStockItem: async (id) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         await deleteOutOfStockItemRemote(id);
         set((state) => ({
@@ -583,6 +663,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       clearOutOfStock: async () => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         await clearOutOfStockItems();
         set({
@@ -593,6 +674,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       markItemsRestockedByLineItems: async (lineItemNames) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const normalizedLineNames = lineItemNames.map((name) => normalize(name));
         const matches = get().outOfStockItems.filter((item) =>
@@ -628,6 +710,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       addCustomer: async (name, phone) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const trimmed = name.trim();
         if (!trimmed) {
@@ -655,6 +738,7 @@ export const useAppStore = create<AppStoreState>()(
         description = null,
         date,
       ) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         if (amountPaise <= 0) {
           return;
@@ -676,6 +760,7 @@ export const useAppStore = create<AppStoreState>()(
       },
 
       deleteUdhaarEntry: async (customerId, entryId) => {
+        assertSubscriptionForWrite(get().subscription);
         assertOnlineForWrite(get().isOffline);
         const updatedCustomer = await deleteUdhaarEntryRemote(entryId);
         set((state) => ({
@@ -710,6 +795,7 @@ export const useAppStore = create<AppStoreState>()(
         outOfStockItems: state.outOfStockItems,
         customers: state.customers,
         isOffline: state.isOffline,
+        subscription: state.subscription,
         lastSyncAt: state.lastSyncAt,
         lastFullSyncAt: state.lastFullSyncAt,
         syncCursor: state.syncCursor,

@@ -19,7 +19,6 @@ import {
   updatedAfterQuerySchema,
 } from '../validators/schemas';
 import { recordAuditEvent } from '../services/audit';
-import { createRazorpayPaymentLink } from '../services/razorpay';
 
 const customerIdParamSchema = z.object({
   id: objectIdSchema,
@@ -30,19 +29,6 @@ const entryIdParamSchema = z.object({
 });
 
 const udhaarRouter = Router();
-
-const normalizePhoneForRazorpay = (phone: string | null): string | null => {
-  if (!phone) {
-    return null;
-  }
-
-  const normalized = phone.replace(/[^\d+]/g, '');
-  if (normalized.replace(/\D/g, '').length < 10) {
-    return null;
-  }
-
-  return normalized;
-};
 
 const fetchCustomerWithEntries = async (
   id: string,
@@ -258,138 +244,6 @@ udhaarRouter.post(
     }
 
     sendCreated(res, updatedCustomer);
-  }),
-);
-
-udhaarRouter.post(
-  '/:id/payment-link',
-  asyncHandler(async (req, res) => {
-    const ownerUserId = getAuthUserId(req);
-    const { id } = customerIdParamSchema.parse(req.params);
-
-    const paymentLink = await withTransaction(async (client) => {
-      const customerResult = await dbQuery<UdhaarCustomerRow>(
-        `
-          select id, customer_name, phone, created_at, updated_at
-          from udhaar_customers
-          where id = $1
-            and owner_user_id = $2
-          for update
-        `,
-        [id, ownerUserId],
-        client,
-      );
-
-      if (customerResult.rows.length === 0) {
-        notFound('Udhaar customer');
-      }
-
-      const customer = customerResult.rows[0];
-      const customerPhone = normalizePhoneForRazorpay(customer.phone);
-      if (!customerPhone) {
-        throw new HttpError(400, 'Customer phone number is required for Razorpay payment link');
-      }
-
-      const balanceResult = await dbQuery<{ balance_paise: number }>(
-        `
-          select coalesce(
-            sum(
-              case
-                when type = 'credit' then amount_paise
-                when type = 'repayment' then -amount_paise
-                else 0
-              end
-            ),
-            0
-          )::int as balance_paise
-          from udhaar_entries
-          where customer_id = $1
-            and deleted_at is null
-        `,
-        [id],
-        client,
-      );
-
-      const balancePaise = balanceResult.rows[0]?.balance_paise ?? 0;
-      if (balancePaise <= 0) {
-        throw new HttpError(409, 'No outstanding udhaar balance to collect');
-      }
-
-      const existingLinkResult = await dbQuery<{
-        id: string;
-        short_url: string;
-        amount_paise: number;
-        status: string;
-        created_at: Date | string;
-      }>(
-        `
-          select id, short_url, amount_paise, status, created_at
-          from razorpay_udhaar_payment_links
-          where customer_id = $1
-            and owner_user_id = $2
-            and amount_paise = $3
-            and status = 'created'
-          order by created_at desc
-          limit 1
-        `,
-        [id, ownerUserId, balancePaise],
-        client,
-      );
-
-      const existingLink = existingLinkResult.rows[0];
-      if (existingLink) {
-        return {
-          paymentLinkId: existingLink.id,
-          shortUrl: existingLink.short_url,
-          amountPaise: existingLink.amount_paise,
-          status: existingLink.status,
-        };
-      }
-
-      const referenceId = createObjectId();
-      const createdLink = await createRazorpayPaymentLink({
-        customerName: customer.customer_name,
-        customerPhone,
-        amountPaise: balancePaise,
-        referenceId,
-        ownerUserId,
-        customerId: id,
-      });
-
-      await dbQuery(
-        `
-          insert into razorpay_udhaar_payment_links (
-            id,
-            reference_id,
-            owner_user_id,
-            customer_id,
-            amount_paise,
-            short_url,
-            status
-          )
-          values ($1, $2, $3, $4, $5, $6, $7)
-        `,
-        [
-          createdLink.id,
-          referenceId,
-          ownerUserId,
-          id,
-          balancePaise,
-          createdLink.short_url,
-          createdLink.status,
-        ],
-        client,
-      );
-
-      return {
-        paymentLinkId: createdLink.id,
-        shortUrl: createdLink.short_url,
-        amountPaise: balancePaise,
-        status: createdLink.status,
-      };
-    });
-
-    sendOk(res, paymentLink);
   }),
 );
 

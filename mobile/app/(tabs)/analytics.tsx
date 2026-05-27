@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { t } from '@/i18n';
@@ -202,6 +203,7 @@ export default function AnalyticsScreen() {
   return (
     <ScreenContainer contentStyle={styles.content}>
       <ScreenHeader title={t('analytics')} subtitle={t('netPosition')} />
+      <SubscriptionNotice />
       {remoteError ? (
         <GlassCard style={styles.card}>
           <AppText variant="caption">{remoteError}</AppText>

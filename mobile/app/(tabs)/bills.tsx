@@ -1,12 +1,13 @@
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { BillCard } from '@/components/bill/BillCard';
 import { EmptyState } from '@/components/common/EmptyState';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { AppText } from '@/components/ui/AppText';
 import { GradientButton } from '@/components/ui/GradientButton';
 import { t } from '@/i18n';
@@ -32,6 +33,7 @@ export default function BillsScreen() {
   const bills = useAppStore((state) => state.bills);
   const vendors = useAppStore((state) => state.vendors);
   const overdueThresholdDays = useAppStore((state) => state.settings.overdueThresholdDays);
+  const subscription = useAppStore((state) => state.subscription);
 
   const computedBills = useMemo(() => withComputedStatus(bills, overdueThresholdDays), [bills, overdueThresholdDays]);
 
@@ -58,9 +60,22 @@ export default function BillsScreen() {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [activeTab, computedBills, query, vendors]);
 
+  const openScan = () => {
+    if (!subscription?.canUseFeatures) {
+      Alert.alert(
+        subscription?.alertTitle ?? 'Subscription required',
+        subscription?.alertMessage ??
+          'Set up Rs 1/month auto pay to unlock editing features.',
+      );
+      return;
+    }
+    router.push('/scan');
+  };
+
   return (
     <ScreenContainer contentStyle={styles.content}>
       <ScreenHeader title={t('bills')} subtitle={`${filtered.length} records`} />
+      <SubscriptionNotice />
 
       <View style={styles.searchWrap}>
         <Feather name="search" size={16} color="#A4B1C7" />
@@ -75,7 +90,7 @@ export default function BillsScreen() {
 
       <GradientButton
         label={t('scanNewBill')}
-        onPress={() => router.push('/scan')}
+        onPress={openScan}
         icon={<Feather name="camera" size={16} color="#0B1120" />}
       />
 

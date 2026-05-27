@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { EmptyState } from '@/components/common/EmptyState';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { GradientButton } from '@/components/ui/GradientButton';
@@ -25,6 +26,7 @@ export default function UdhaarScreen() {
 
   const customers = useAppStore((state) => state.customers);
   const addCustomer = useAppStore((state) => state.addCustomer);
+  const subscription = useAppStore((state) => state.subscription);
 
   const customersSorted = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -61,6 +63,7 @@ export default function UdhaarScreen() {
   return (
     <ScreenContainer contentStyle={styles.content}>
       <ScreenHeader title={t('udhaar')} subtitle={`${customers.length} customers`} />
+      <SubscriptionNotice />
 
       <View style={styles.searchRow}>
         <Feather name="search" size={16} color="#94A3B8" />
@@ -105,7 +108,17 @@ export default function UdhaarScreen() {
       ) : (
         <GradientButton
           label={t('addCustomer')}
-          onPress={() => setShowForm(true)}
+          onPress={() => {
+            if (!subscription?.canUseFeatures) {
+              Alert.alert(
+                subscription?.alertTitle ?? 'Subscription required',
+                subscription?.alertMessage ??
+                  'Set up Rs 1/month auto pay to unlock editing features.',
+              );
+              return;
+            }
+            setShowForm(true);
+          }}
           icon={<Feather name="plus" size={16} color="#0B1120" />}
         />
       )}

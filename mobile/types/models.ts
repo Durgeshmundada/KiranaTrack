@@ -5,6 +5,11 @@ export type PaymentMode = 'cash' | 'upi' | 'cheque' | 'other';
 export type OutOfStockStatus = 'pending' | 'ordered' | 'restocked';
 export type UdhaarEntryType = 'credit' | 'repayment';
 export type AppLanguage = 'en' | 'hi' | 'mr';
+export type SubscriptionAccessStatus =
+  | 'active'
+  | 'past_due'
+  | 'setup_required'
+  | 'frozen';
 
 export interface LineItem {
   id: Id;
@@ -86,6 +91,42 @@ export interface AppSettings {
   overdueThresholdDays: number;
   defaultPaymentMode: PaymentMode;
   lockOnOpen: boolean;
+}
+
+export interface AppSubscriptionStatus {
+  status:
+    | 'none'
+    | 'created'
+    | 'authenticated'
+    | 'active'
+    | 'pending'
+    | 'halted'
+    | 'cancelled'
+    | 'completed'
+    | 'expired'
+    | 'paused'
+    | 'resumed'
+    | 'unknown';
+  accessStatus: SubscriptionAccessStatus;
+  canUseFeatures: boolean;
+  autoPayEnabled: boolean;
+  amountPaise: number;
+  currency: 'INR';
+  billingPeriod: 'monthly';
+  planId: string | null;
+  razorpaySubscriptionId: string | null;
+  shortUrl: string | null;
+  checkoutUrl: string | null;
+  currentStart: string | null;
+  currentEnd: string | null;
+  nextChargeAt: string | null;
+  endedAt: string | null;
+  paidCount: number;
+  totalCount: number;
+  lastPaymentId: string | null;
+  alertTitle: string;
+  alertMessage: string;
+  updatedAt: string | null;
 }
 
 export interface ParsedBillDraft {

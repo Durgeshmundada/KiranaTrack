@@ -6,6 +6,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { EmptyState } from '@/components/common/EmptyState';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { t } from '@/i18n';
@@ -89,6 +90,8 @@ export default function NotepadScreen() {
           </Pressable>
         }
       />
+
+      <SubscriptionNotice />
 
       {showInput ? (
         <GlassCard style={styles.inputCard}>

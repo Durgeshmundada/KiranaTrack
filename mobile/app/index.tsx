@@ -72,7 +72,7 @@ export default function IntroScreen() {
         <Animated.View style={[styles.glowRing, ringAnim]} />
 
         <Animated.View style={[styles.logoWrap, logoAnim]}>
-          <Image source={require('@/assets/images/icon.png')} style={styles.logo} resizeMode="cover" />
+          <Image source={require('@/assets/images/brand-image.png')} style={styles.logo} resizeMode="contain" />
         </Animated.View>
 
         <Animated.View style={textAnim}>
@@ -109,18 +109,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(56,189,248,0.12)',
   },
   logoWrap: {
-    width: 112,
-    height: 112,
-    borderRadius: radii.xl,
-    padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    width: 220,
+    height: 220,
+    borderRadius: radii.lg,
+    padding: 10,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
+    borderColor: 'rgba(255,255,255,0.28)',
   },
   logo: {
     width: '100%',
     height: '100%',
-    borderRadius: 18,
+    borderRadius: 12,
   },
   title: {
     textAlign: 'center',

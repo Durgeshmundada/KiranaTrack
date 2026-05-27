@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 WebBrowser.maybeCompleteAuthSession();
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -123,8 +124,16 @@ export default function LoginScreen() {
 
   return (
     <LinearGradient colors={['#050816', '#0B1C35', '#112C4E']} style={styles.container}>
-      <View style={styles.bgOrbTop} />
-      <View style={styles.bgOrbBottom} />
+      <Image
+        source={require('@/assets/images/brand-image.png')}
+        style={styles.bgBrandTop}
+        resizeMode="contain"
+      />
+      <Image
+        source={require('@/assets/images/brand-banner.png')}
+        style={styles.bgBrandBottom}
+        resizeMode="contain"
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardWrap}
@@ -248,23 +257,21 @@ const styles = StyleSheet.create({
   keyboardWrap: {
     gap: 14,
   },
-  bgOrbTop: {
+  bgBrandTop: {
     position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 999,
-    backgroundColor: 'rgba(249,115,22,0.28)',
-    top: -70,
-    right: -50,
+    width: 260,
+    height: 260,
+    top: -72,
+    right: -74,
+    opacity: 0.13,
   },
-  bgOrbBottom: {
+  bgBrandBottom: {
     position: 'absolute',
-    width: 280,
-    height: 280,
-    borderRadius: 999,
-    backgroundColor: 'rgba(34,211,238,0.18)',
-    bottom: -120,
-    left: -100,
+    width: 300,
+    height: 300,
+    bottom: -130,
+    left: -98,
+    opacity: 0.1,
   },
   brandWrap: {
     gap: 6,

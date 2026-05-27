@@ -20,6 +20,7 @@ vi.mock('@/i18n', () => ({
 
 vi.mock('@/services/backendData', () => ({
   addPayment: vi.fn(),
+  cancelSubscription: vi.fn(),
   clearOutOfStockItems: vi.fn(),
   createBill: vi.fn(),
   createOutOfStockItem: vi.fn(),
@@ -33,8 +34,11 @@ vi.mock('@/services/backendData', () => ({
   editPayment: vi.fn(),
   fetchBillsWithPayments: vi.fn(),
   fetchOutOfStockItems: vi.fn(),
+  fetchSubscriptionStatus: vi.fn(),
   fetchUdhaarCustomers: vi.fn(),
   fetchVendors: vi.fn(),
+  refreshSubscription: vi.fn(),
+  startSubscription: vi.fn(),
   updateOutOfStockStatus: vi.fn(),
 }));
 
@@ -44,6 +48,7 @@ import {
   editPayment,
   fetchBillsWithPayments,
   fetchOutOfStockItems,
+  fetchSubscriptionStatus,
   fetchUdhaarCustomers,
   fetchVendors,
 } from '@/services/backendData';
@@ -55,7 +60,32 @@ const deletePaymentMock = vi.mocked(deletePayment);
 const fetchVendorsMock = vi.mocked(fetchVendors);
 const fetchBillsWithPaymentsMock = vi.mocked(fetchBillsWithPayments);
 const fetchOutOfStockItemsMock = vi.mocked(fetchOutOfStockItems);
+const fetchSubscriptionStatusMock = vi.mocked(fetchSubscriptionStatus);
 const fetchUdhaarCustomersMock = vi.mocked(fetchUdhaarCustomers);
+
+const activeSubscription = {
+  status: 'active' as const,
+  accessStatus: 'active' as const,
+  canUseFeatures: true,
+  autoPayEnabled: true,
+  amountPaise: 100,
+  currency: 'INR' as const,
+  billingPeriod: 'monthly' as const,
+  planId: 'plan_1',
+  razorpaySubscriptionId: 'sub_1',
+  shortUrl: null,
+  checkoutUrl: null,
+  currentStart: '2026-03-01T00:00:00.000Z',
+  currentEnd: '2026-04-01T00:00:00.000Z',
+  nextChargeAt: '2026-04-01T00:00:00.000Z',
+  endedAt: null,
+  paidCount: 1,
+  totalCount: 1200,
+  lastPaymentId: 'pay_1',
+  alertTitle: 'Subscription active',
+  alertMessage: 'Your Rs 1/month auto pay is active.',
+  updatedAt: '2026-03-01T00:00:00.000Z',
+};
 
 const resetStore = () => {
   useAppStore.setState({
@@ -95,6 +125,8 @@ const resetStore = () => {
     outOfStockItems: [],
     customers: [],
     isOffline: false,
+    subscription: activeSubscription,
+    subscriptionLoading: false,
   });
 };
 
@@ -102,6 +134,7 @@ describe('appStore e2e-like flows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     asyncStorageMap.clear();
+    fetchSubscriptionStatusMock.mockResolvedValue(activeSubscription);
     resetStore();
   });
 

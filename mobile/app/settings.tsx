@@ -7,6 +7,7 @@ import { Alert, Pressable, StyleSheet, Switch, TextInput, View } from 'react-nat
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { checkBackendHealth } from '@/services/backendHealth';
 import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -403,6 +404,8 @@ export default function SettingsScreen() {
     <ScreenContainer contentStyle={styles.content}>
       <ScreenHeader title={t('settings')} subtitle="Security, language and backups" />
 
+      <SubscriptionNotice alwaysVisible />
+
       <GlassCard style={styles.section}>
         <AppText variant="subtitle">Connectivity</AppText>
         <GradientButton
@@ -542,11 +545,11 @@ export default function SettingsScreen() {
         <GradientButton label={t('restoreBackup')} onPress={restoreBackup} variant="accent" />
         <View style={styles.monthPicker}>
           <Pressable onPress={() => shiftMonth(-1)} style={styles.monthArrow}>
-            <AppText variant="label" style={styles.monthArrowText}>{`◀`}</AppText>
+            <AppText variant="label" style={styles.monthArrowText}>{'<'}</AppText>
           </Pressable>
           <AppText variant="label" style={styles.monthLabel}>{exportMonthLabel}</AppText>
           <Pressable onPress={() => shiftMonth(1)} style={styles.monthArrow}>
-            <AppText variant="label" style={styles.monthArrowText}>{`▶`}</AppText>
+            <AppText variant="label" style={styles.monthArrowText}>{'>'}</AppText>
           </Pressable>
         </View>
         <GradientButton label={t('exportMonthlyPdf')} onPress={exportMonthlyReport} />

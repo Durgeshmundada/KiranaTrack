@@ -1,16 +1,15 @@
-import { Feather } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Alert, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { SubscriptionNotice } from '@/components/subscription/SubscriptionNotice';
 import { AppText } from '@/components/ui/AppText';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { GradientButton } from '@/components/ui/GradientButton';
 import { PinOverlay } from '@/components/ui/PinOverlay';
 import { t } from '@/i18n';
-import { createUdhaarPaymentLink, type UdhaarPaymentLink } from '@/services/backendData';
 import { useAppStore } from '@/store/appStore';
 import { customerBalancePaise } from '@/store/selectors';
 import { radii, typography } from '@/theme/tokens';
@@ -37,6 +36,7 @@ export default function UdhaarDetailScreen() {
   const customers = useAppStore((state) => state.customers);
   const addUdhaarEntry = useAppStore((state) => state.addUdhaarEntry);
   const deleteUdhaarEntry = useAppStore((state) => state.deleteUdhaarEntry);
+  const subscription = useAppStore((state) => state.subscription);
 
   const [form, setForm] = useState<EntryFormState>(initialFormState);
   const [amount, setAmount] = useState('');
@@ -47,15 +47,8 @@ export default function UdhaarDetailScreen() {
   const [showPin, setShowPin] = useState(false);
   const [savingEntry, setSavingEntry] = useState(false);
   const [deletingEntry, setDeletingEntry] = useState(false);
-  const [paymentLink, setPaymentLink] = useState<UdhaarPaymentLink | null>(null);
-  const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
-  const [sharingPaymentLink, setSharingPaymentLink] = useState(false);
 
   const customer = useMemo(() => customers.find((item) => item.id === id), [customers, id]);
-
-  useEffect(() => {
-    setPaymentLink(null);
-  }, [id]);
 
   if (!customer) {
     return (
@@ -77,73 +70,15 @@ export default function UdhaarDetailScreen() {
     .reduce((sum, entry) => sum + entry.amountPaise, 0);
   const balance = customerBalancePaise(customer);
 
-  const getPaymentLink = async (): Promise<UdhaarPaymentLink | null> => {
-    if (balance <= 0) {
-      Alert.alert('Nothing to collect', 'This customer has no outstanding udhaar balance.');
-      return null;
-    }
-
-    if (!customer.phone) {
-      Alert.alert('Phone required', 'Add a customer phone number before collecting online payment.');
-      return null;
-    }
-
-    if (paymentLink?.amountPaise === balance) {
-      return paymentLink;
-    }
-
-    const createdLink = await createUdhaarPaymentLink(customer.id);
-    setPaymentLink(createdLink);
-    return createdLink;
-  };
-
-  const collectPayment = async () => {
-    if (creatingPaymentLink) {
-      return;
-    }
-
-    try {
-      setCreatingPaymentLink(true);
-      const link = await getPaymentLink();
-      if (!link) {
-        return;
-      }
-      await Linking.openURL(link.shortUrl);
-    } catch (error) {
-      Alert.alert(
-        'Payment link failed',
-        resolveUserErrorMessage(error, 'Could not create or open payment link. Please try again.'),
-      );
-    } finally {
-      setCreatingPaymentLink(false);
-    }
-  };
-
-  const sharePaymentLinkViaWhatsApp = async () => {
-    if (sharingPaymentLink) {
-      return;
-    }
-
-    try {
-      setSharingPaymentLink(true);
-      const link = await getPaymentLink();
-      if (!link) {
-        return;
-      }
-
-      const message = `Please pay ${formatINRFromPaise(link.amountPaise)} for your KiranaTrack udhaar: ${link.shortUrl}`;
-      await Linking.openURL(`whatsapp://send?text=${encodeURIComponent(message)}`);
-    } catch (error) {
-      Alert.alert(
-        'WhatsApp share failed',
-        resolveUserErrorMessage(error, 'Could not open WhatsApp with the payment link.'),
-      );
-    } finally {
-      setSharingPaymentLink(false);
-    }
-  };
-
   const openForm = (type: UdhaarEntryType) => {
+    if (!subscription?.canUseFeatures) {
+      Alert.alert(
+        subscription?.alertTitle ?? 'Subscription required',
+        subscription?.alertMessage ??
+          'Set up Rs 1/month auto pay to unlock editing features.',
+      );
+      return;
+    }
     setAmount('');
     setDescription('');
     setDate(new Date().toISOString().slice(0, 10));
@@ -187,6 +122,15 @@ export default function UdhaarDetailScreen() {
   };
 
   const requestDelete = async (entryId: string) => {
+    if (!subscription?.canUseFeatures) {
+      Alert.alert(
+        subscription?.alertTitle ?? 'Subscription required',
+        subscription?.alertMessage ??
+          'Set up Rs 1/month auto pay to unlock editing features.',
+      );
+      return;
+    }
+
     const pinExists = await hasPin();
     if (!pinExists) {
       Alert.alert(
@@ -230,6 +174,7 @@ export default function UdhaarDetailScreen() {
   return (
     <ScreenContainer contentStyle={styles.content}>
       <ScreenHeader title={customer.customerName} subtitle={customer.phone ?? 'No phone'} />
+      <SubscriptionNotice />
 
       <GlassCard intense style={styles.balanceCard}>
         <View style={styles.balanceRow}>
@@ -253,19 +198,6 @@ export default function UdhaarDetailScreen() {
       </GlassCard>
 
       <View style={styles.ctaRow}>
-        <GradientButton
-          label={creatingPaymentLink ? 'Opening...' : 'Collect Payment'}
-          onPress={collectPayment}
-          disabled={creatingPaymentLink || sharingPaymentLink || balance <= 0}
-          icon={<Feather name="external-link" size={16} color="#0B1120" />}
-        />
-        <GradientButton
-          label={sharingPaymentLink ? 'Opening WhatsApp...' : 'Share Link via WhatsApp'}
-          onPress={sharePaymentLinkViaWhatsApp}
-          disabled={creatingPaymentLink || sharingPaymentLink || balance <= 0}
-          variant="accent"
-          icon={<Feather name="send" size={16} color="#0B1120" />}
-        />
         <GradientButton label={t('addCredit')} onPress={() => openForm('credit')} />
         <GradientButton
           label={t('addRepayment')}
